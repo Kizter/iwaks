@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <filter id="rough" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="3" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="3"/>
+    </filter>
+  </defs>
+
+  <!-- tile: cream -->
+  <rect width="512" height="512" rx="112" fill="#f4f6ea"/>
+
+  <!-- sparkles (ink dots) -->
+  <g id="sparkles" fill="#026aa7">
+    <path d="M84 96 l 5 12 12 5 -12 5 -5 12 -5 -12 -12 -5 12 -5 Z" opacity="0.9"/>
+    <circle cx="436" cy="150" r="6"/>
+    <circle cx="452" cy="330" r="4"/>
+    <circle cx="120" cy="470" r="5"/>
+    <circle cx="70" cy="250" r="4"/>
+    <circle cx="470" cy="96" r="5"/>
+  </g>
+
+  <!-- music note (top right) -->
+  <g id="note" stroke="#026aa7" stroke-width="14" stroke-linecap="round" fill="none">
+    <path d="M398 92 l 0 96"/>
+    <path d="M398 112 C 366 104, 342 116, 338 138 C 334 158, 350 174, 372 172 C 384 171, 394 164, 398 158"/>
+    <circle cx="412" cy="196" r="17" fill="#026aa7" stroke="none"/>
+  </g>
+
+  <!-- ===== fish ===== -->
+  <g id="fish" filter="url(#rough)">
+    <!-- tail fins (sweeping left) -->
+    <path d="M330 196 C 388 160, 422 176, 414 206 C 440 198, 456 228, 424 250 C 450 262, 436 300, 394 294 Z"
+          fill="#e3f1e7" stroke="#026aa7" stroke-width="11" stroke-linejoin="round"/>
+    <path d="M336 240 C 388 226, 420 252, 398 282 Z"
+          fill="none" stroke="#026aa7" stroke-width="8" opacity="0.8"/>
+    <!-- dorsal fin -->
+    <path d="M236 168 C 248 118, 306 112, 318 166 Z"
+          fill="#e3f1e7" stroke="#026aa7" stroke-width="10" stroke-linejoin="round"/>
+    <!-- body -->
+    <path d="M150 216 C 176 162, 262 148, 316 176 C 366 202, 384 244, 370 292 C 358 338, 298 366, 236 356 C 176 346, 132 300, 132 260 C 131 244, 138 226, 150 216 Z"
+          fill="#e3f1e7" stroke="#026aa7" stroke-width="12" stroke-linejoin="round"/>
+    <!-- belly line -->
+    <path d="M150 344 C 204 372, 284 372, 340 336"
+          fill="none" stroke="#026aa7" stroke-width="8" stroke-linecap="round" opacity="0.75"/>
+    <!-- gill arcs -->
+    <path d="M216 240 C 204 262, 204 286, 220 306"
+          fill="none" stroke="#026aa7" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+    <!-- barbels (kumis koi) -->
+    <path d="M128 300 C 92 296, 82 316, 106 330"
+          fill="none" stroke="#026aa7" stroke-width="9" stroke-linecap="round"/>
+    <path d="M134 314 C 106 320, 102 340, 128 346"
+          fill="none" stroke="#026aa7" stroke-width="9" stroke-linecap="round"/>
+    <!-- eye -->
+    <circle cx="196" cy="238" r="30" fill="#ffffff" stroke="#026aa7" stroke-width="11"/>
+    <circle cx="206" cy="234" r="13" fill="#026aa7"/>
+    <circle cx="211" cy="229" r="5" fill="#c8f7ff"/>
+    <!-- smile -->
+    <path d="M148 322 Q 172 342 196 328"
+          fill="none" stroke="#026aa7" stroke-width="9" stroke-linecap="round"/>
+  </g>
+
+  <!-- ===== cassette ===== -->
+  <g id="cassette" filter="url(#rough)">
+    <rect x="126" y="334" width="270" height="112" rx="20"
+          fill="#ffffff" stroke="#026aa7" stroke-width="11"/>
+    <!-- label window -->
+    <rect x="172" y="352" width="178" height="28" rx="8"
+          fill="#c8f7ff" stroke="#026aa7" stroke-width="8"/>
+    <path d="M196 366 l 44 0 M 264 366 l 44 0" stroke="#026aa7" stroke-width="6" stroke-linecap="round" opacity="0.7"/>
+    <!-- reels -->
+    <circle cx="196" cy="416" r="34" fill="#e3f1e7" stroke="#026aa7" stroke-width="10"/>
+    <circle cx="196" cy="416" r="10" fill="#026aa7"/>
+    <circle cx="326" cy="416" r="34" fill="#e3f1e7" stroke="#026aa7" stroke-width="10"/>
+    <circle cx="326" cy="416" r="10" fill="#026aa7"/>
+    <!-- screws -->
+    <circle cx="150" cy="424" r="6" fill="#026aa7"/>
+    <circle cx="372" cy="424" r="6" fill="#026aa7"/>
+  </g>
+</svg>

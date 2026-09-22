@@ -1,10 +1,19 @@
 :root {
+  /* Iwaks — tema terang krem + biru (konsep Crayoncase) */
+  --bg: #f4f6ea;
+  --ink: #026aa7;
+  --ink-soft: #4a83a8;
+  --mint: #e3f1e7;
+  --ice: #c8f7ff;
+  --text: #26405c;
+  --text-dim: #5f7d96;
+
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.5;
 
-  color: #e8e8e8;
-  background-color: #141417;
+  color: var(--text);
+  background-color: var(--bg);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -32,17 +41,20 @@ body {
 }
 
 .brand-mark {
-  font-size: 3rem;
-  color: #7c5cff;
+  width: 200px;
+  height: 200px;
+  border-radius: 44px;
+  box-shadow: 0 12px 32px rgba(2, 106, 167, 0.18);
 }
 
 .brand h1 {
-  margin: 0.25rem 0 0;
+  margin: 1.1rem 0 0;
   font-size: 2rem;
   letter-spacing: 0.04em;
+  color: var(--ink);
 }
 
 .brand p {
-  margin: 0.25rem 0 0;
-  color: #9a9aa3;
+  margin: 0.3rem 0 0;
+  color: var(--text-dim);
 }

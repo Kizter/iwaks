@@ -1,11 +1,12 @@
 import "./App.css";
+import iwaksMark from "./assets/iwaks-mark.png";
 
 function App() {
   return (
     <main className="shell">
       <div className="brand">
-        <span className="brand-mark">♪</span>
-        <h1>MusicForge</h1>
+        <img className="brand-mark" src={iwaksMark} alt="" />
+        <h1>Iwaks</h1>
         <p>Hi-res &amp; lossless offline music player</p>
       </div>
     </main>

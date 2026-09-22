@@ -34,7 +34,7 @@ if ($Mode -eq "baseline") {
 }
 
 $current = @{
-    project = "musicforge"
+    project = "iwaks"
     updated = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
     metrics = @{
         npm_build_ms = [math]::Round($npmBuild)

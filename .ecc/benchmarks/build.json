@@ -1,5 +1,5 @@
 ﻿{
-    "project":  "musicforge",
+    "project":  "iwaks",
     "metrics":  {
                     "cargo_test_ms":  38058,
                     "cargo_check_ms":  53590,

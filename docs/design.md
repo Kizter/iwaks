@@ -1,4 +1,4 @@
-# MusicForge — Design Document (v1)
+# Iwaks — Design Document (v1)
 
 > Music player desktop Windows untuk audio hi-res & lossless offline, ala Poweramp Android.
 > Stack: **Tauri v2 + Rust + libmpv → WASAPI exclusive + SQLite + React/TS/Tailwind**.
@@ -22,7 +22,7 @@
 | A1 | Resampler berkualitas tinggi (soxr) aktif melalui libmpv — hampir gratis, fallback saat device tidak mendukung sample rate file |
 | A2 | Performance target: warm start < 3 dtk, scan 10.000 file < 30 dtk, RAM < 300 MB, UI responsif saat lagu hi-res diputar |
 | A3 | Privasi: offline murni, tanpa telemetri; koneksi jaringan hanya saat casting/scan | foldern |
-| A4 | Bahasa UI: Inggris (netral untuk berbagi GitHub); nama app "MusicForge" (bisa diganti) |
+| A4 | Bahasa UI: Inggris (netral untuk berbagi GitHub); nama app "Iwaks" (final) |
 | A5 | Lisensi GitHub: MIT |
 | A6 | Reliability: file corrupt/format aneh → skip + warning, tidak pernah crash |
 | A7 | libmpv di-bundle sebagai `mpv-1.dll` untuk Windows (supplied binary) |
@@ -38,7 +38,7 @@
 | D4 | EQ + gapless/crossfade/ReplayGain + sleep timer/speed | resampler terpisah | Per user; resampler = A1 |
 | D5 | Scanner+tag, search+filter, playlist+queue | — | Per user |
 | D6 | Tag editor + folder browse masuk scope v1 | non-goal | Koreksi user |
-| D7 | Dark modern ala Poweramp | minimalis / klasik | Per user |
+| D7 | Dark modern ala Poweramp → **final: terang krem + tinta biru** (konsep sketsa user) | minimalis / klasik | Pilihan user; dikunci lewat konsep gambar |
 | D8 | Tauri v2 + Rust | Electron, C# | Ringan, WASAPI, ekosistem |
 | D9 | libmpv engine | Pure Rust decode | Semua format + DSD, matang |
 | D10 | Pendekatan A: modular monolith | B (thin frontend), C (proses terpisah) | Scope besar, satu binary |
@@ -48,13 +48,14 @@
 | D14 | Skill backend: tailwind-patterns, typescript-expert, backend-architect, tauri-v2 (+ rust-architect opsional) | — | Per user |
 | D15 | Skill saat kerja: clean-code, ponytail, performance-optimizer, benchmark | — | Per user |
 | D16 | **Bluetooth ditunda post-v1** | — | Koreksi user |
+| D17 | **Branding: nama "Iwaks", maskot ikan koi+caset, tema terang krem+biru** | — | Konsep user (D7 diubah) |
 
 ## 4. Final Design
 
 ### 4.1 Arsitektur — Cargo workspace (modular monolith)
 
 ```
-musicforge/
+iwaks/
 ├── crates/
 │   ├── core/           # Domain murni: Track, Album, Playlist, queue logic (tanpa I/O)
 │   ├── audio/          # Wrapper libmpv: playback, EQ, volume, events, output devices
@@ -123,7 +124,7 @@ playlist_tracks(playlist_id, track_id, position)
 ### 4.6 Error Handling & Reliability
 
 - Tipe `AppError` terpusat → pesan UI + kode; tanpa `unwrap` di jalur user-facing.
-- Panic hook → dialog + log `%LOCALAPPDATA%/MusicForge/logs`.
+- Panic hook → dialog + log `%LOCALAPPDATA%/Iwaks/logs`.
 - Playback error → toast merah + auto-skip.
 
 ### 4.7 Testing (TDD, ≥80% saat ada test)
@@ -153,8 +154,30 @@ playlist_tracks(playlist_id, track_id, position)
 - **DSD**: perilaku tergantung device (native vs PCM fallback) — perlu pengujian perangkat nyata.
 - **WASAPI exclusive**: koneksi bisa "hilang" saat device diputus — perlu listener device.
 
-## 6. Open Items (bukan blocker)
+## 6. Brand & Identitas Visual
+
+**Nama aplikasi:** Iwaks (dari "ikan" — maskot ikan).
+
+**Tema:** terinspirasi estetika band indie asal Surabaya **Crayoncase** (noise pop/shoegaze):
+- DIY lo-fi, playful "berbagai warna krayon", sentuhan indie Jepang (Supercar/Solanin era)
+- Nostalgia kaset/CD, film photography, dreamy noise
+- Diekspresikan sebagai: **tema terang krem + tinta biru** (dikonfirmasi user: konsep sketsa tangan — ikan + kaset + not musik; bukan dark) + detail hand-drawn/sketch
+
+**Maskot (ikon resmi):** sketsa tinta biru — ikan koi dengan kumis, duduk di atas kaset, not musik melayang, bintang kecil; isian mint muda + highlight es. Dikonversi via `tauri icon` (ico/png/icns semua ukuran). Tetap terbaca di 16px (favicon) hingga 512px (app icon).
+
+**Palet inti (v2 — terang):**
+| Token | Hex | Penggunaan |
+|---|---|---|
+| `--bg` | `#f4f6ea` | Latar utama (krem) |
+| `--surface` | `#ffffff` | Panel/card |
+| `--ink` | `#026aa7` | Tinta biru — aksen/utama |
+| `--mint` | `#e3f1e7` | Isian lembut / highlight lembut |
+| `--ice` | `#c8f7ff` | Highlight (kilau mata/reel) |
+| `--text` | `#26405c` | Teks utama |
+| `--text-dim` | `#5f7d96` | Teks sekunder |
+
+## 7. Open Items (bukan blocker)
 
 - Skill `rust-architect` (nanlong) — 21 install, opsional; default pakai tauri-v2 + clean-code.
-- Nama aplikasi final (MusicForge sementara).
+- Nama aplikasi final: Iwaks (sudah dikunci).
 - Bahasa UI final: Inggris (A4).

@@ -1,12 +1,12 @@
-# 🎵 MusicForge
+# 🐟 Iwaks
 
-**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop.
+**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop, with the DIY charm of Indonesian indie (Crayoncase-inspired theme, fish mascot).
 
 Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WASAPI (bit-perfect)**.
 
 ## Features (roadmap)
 
-- ✅ **M0** — Scaffold, CI, benchmark baseline *(current)*
+- ✅ **M0** — Scaffold, CI, benchmark baseline, branding *(current)*
 - ⏳ **M1** — Library core, SQLite scanner, search
 - ⏳ **M2** — Playback (libmpv), player bar
 - ⏳ **M3** — EQ, ReplayGain, sleep timer, playback speed, visualizer, lyrics

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <g id="tile">
+    <rect width="512" height="512" rx="112" fill="#141417"/>
+    <circle cx="256" cy="256" r="196" fill="#8fc7e8"/>
+  </g>
+  <g id="icon">
+    <!-- body swoosh -->
+    <path d="M128 256 C 128 168, 216 146, 288 162 C 350 176, 392 218, 380 268 C 356 356, 216 384, 150 348 Z" fill="#f2a0b5"/>
+    <!-- note-tail -->
+    <path d="M342 216 l 30 -58 c -26 -10 -52 -6 -58 8 l 0 74 c 10 8 22 12 36 10 l 0 -44 c -4 -6 -8 -4 -8 -8 Z" fill="#ffffff"/>
+    <circle cx="330" cy="226" r="16" fill="#ffffff"/>
+    <!-- eye wink -->
+    <path d="M168 232 Q 196 198 224 232" stroke="#191920" stroke-width="14" stroke-linecap="round" fill="none"/>
+    <!-- fin -->
+    <path d="M150 300 C 118 332, 108 316, 132 292 Z" fill="#ffffff"/>
+    <!-- gill -->
+    <path d="M226 286 Q 236 306 226 326" stroke="#191920" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.55"/>
+    <!-- sparkle -->
+    <circle cx="262" cy="238" r="8" fill="#ffffff"/>
+  </g>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <g id="tile">
+    <rect width="512" height="512" rx="112" fill="#1b1b22"/>
+    <circle cx="120" cy="120" r="10" fill="#f2a0b5" opacity="0.5"/>
+    <circle cx="392" cy="96" r="6" fill="#8fc7e8" opacity="0.6"/>
+    <circle cx="420" cy="360" r="9" fill="#c3b8f0" opacity="0.5"/>
+    <circle cx="96" cy="340" r="5" fill="#8fc7e8" opacity="0.4"/>
+  </g>
+  <g id="icon">
+    <!-- tail = double music note fins -->
+    <path d="M318 236 C 396 176, 424 236, 384 276 C 432 268, 448 316, 402 336 C 420 396, 376 424, 330 372 Z" fill="#8fc7e8"/>
+    <!-- body -->
+    <circle cx="236" cy="270" r="118" fill="#c3b8f0"/>
+    <!-- top fin -->
+    <path d="M150 214 C 168 128, 242 140, 244 190 Z" fill="#f2a0b5"/>
+    <!-- belly -->
+    <path d="M124 300 C 150 380, 300 396, 348 338 C 300 376, 180 372, 124 300 Z" fill="#f2a0b5" opacity="0.85"/>
+    <!-- fins -->
+    <path d="M152 330 C 110 368, 96 348, 118 320 Z" fill="#f2a0b5"/>
+    <path d="M286 362 C 270 408, 236 412, 236 380 Z" fill="#f2a0b5"/>
+    <!-- eye -->
+    <circle cx="196" cy="240" r="30" fill="#ffffff"/>
+    <circle cx="206" cy="236" r="14" fill="#191920"/>
+    <circle cx="211" cy="231" r="5" fill="#ffffff"/>
+    <!-- blush -->
+    <circle cx="168" cy="272" r="14" fill="#f2a0b5" opacity="0.9"/>
+    <!-- smile -->
+    <path d="M174 306 Q 196 324 218 306" stroke="#191920" stroke-width="12" stroke-linecap="round" fill="none"/>
+  </g>
+</svg>
