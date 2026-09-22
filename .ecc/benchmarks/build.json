@@ -1,0 +1,9 @@
+﻿{
+    "project":  "musicforge",
+    "metrics":  {
+                    "cargo_test_ms":  38058,
+                    "cargo_check_ms":  53590,
+                    "npm_build_ms":  1563
+                },
+    "updated":  "2026-09-23T00:17:02Z"
+}

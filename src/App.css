@@ -1,0 +1,48 @@
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+
+  color: #e8e8e8;
+  background-color: #141417;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand {
+  text-align: center;
+}
+
+.brand-mark {
+  font-size: 3rem;
+  color: #7c5cff;
+}
+
+.brand h1 {
+  margin: 0.25rem 0 0;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+}
+
+.brand p {
+  margin: 0.25rem 0 0;
+  color: #9a9aa3;
+}
