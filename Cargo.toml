@@ -16,6 +16,7 @@ thiserror = "2"
 lofty = "0.22"
 rusqlite = { version = "0.37", features = ["bundled"] }
 walkdir = "2"
+base64 = "0.22"
 
 # Shared release profile (was previously in src-tauri/Cargo.toml).
 [profile.release]

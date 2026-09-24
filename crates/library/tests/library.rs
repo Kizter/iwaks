@@ -180,6 +180,37 @@ fn scan_removes_missing_files_only_when_clean_missing() {
     assert_eq!(lib.track_count().unwrap(), 1);
 }
 
+#[test]
+fn scan_of_another_root_accumulates_and_only_prunes_deleted_files() {
+    let tmp = TempDir::new("scan-roots");
+    let root_a = tmp.path("Music A");
+    let root_b = tmp.path("Music B");
+    std::fs::create_dir_all(&root_a).expect("mkdir a");
+    std::fs::create_dir_all(&root_b).expect("mkdir b");
+    for n in ["x1", "x2", "x3"] {
+        make_wav(&root_a.join(format!("{n}.wav")), 44_100, 2, 1.0);
+    }
+    for n in ["y1", "y2"] {
+        make_wav(&root_b.join(format!("{n}.wav")), 44_100, 2, 1.0);
+    }
+    let mut lib = Library::open(":memory:").expect("open");
+
+    let first = scan_once(&mut lib, &root_a, true);
+    assert_eq!(first.added, 3);
+
+    // Scanning a *second* folder must add to the library, not wipe the first.
+    let second = scan_once(&mut lib, &root_b, true);
+    assert_eq!(second.added, 2);
+    assert_eq!(second.removed, 0, "other root's files still exist on disk");
+    assert_eq!(lib.track_count().unwrap(), 5);
+
+    // But a file that actually disappeared from disk is pruned.
+    std::fs::remove_file(root_a.join("x1.wav")).expect("remove x1");
+    let third = scan_once(&mut lib, &root_b, true);
+    assert_eq!(third.removed, 1);
+    assert_eq!(lib.track_count().unwrap(), 4);
+}
+
 // ---------- search (FTS5) ----------
 
 #[test]

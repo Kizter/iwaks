@@ -1,6 +1,7 @@
 //! Audio tag reading/writing via `lofty` (reading implemented in M1;
 //! writing + backup lands with the tag editor in M4).
 
+pub mod cover;
 pub mod read;
 pub mod write;
 

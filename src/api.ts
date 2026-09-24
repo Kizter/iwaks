@@ -15,6 +15,11 @@ export function scanFolder(path: string): Promise<void> {
   return invoke<void>("scan_folder", { path });
 }
 
+/** Embedded album art as a `data:` URL, or `null` when the file has none. */
+export function readCover(path: string): Promise<string | null> {
+  return invoke<string | null>("read_cover", { path });
+}
+
 /** Native folder picker; resolves `null` when the user cancels. */
 export async function pickFolder(): Promise<string | null> {
   const picked = await open({

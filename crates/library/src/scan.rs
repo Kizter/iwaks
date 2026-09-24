@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use iwaks_core::scan::{classify_file, find_stale, is_supported_audio, FileState};
+use iwaks_core::scan::{classify_file, is_supported_audio, FileState};
 use iwaks_core::track::Track;
 use iwaks_tags::read::read_metadata;
 
@@ -51,8 +51,6 @@ pub fn scan(
         .map(|(p, m, s)| (norm(&p), (p, m, s)))
         .collect();
 
-    let mut found: Vec<String> = Vec::with_capacity(total);
-
     for path in &files {
         let stat = match std::fs::metadata(path) {
             Ok(m) => m,
@@ -64,7 +62,6 @@ pub fn scan(
         let modified = modified_secs(&stat);
         let size = stat.len() as i64;
         let norm_path = norm(&path.to_string_lossy());
-        found.push(path.to_string_lossy().into_owned());
 
         let state = match existing.get(&norm_path) {
             Some((_, db_mtime, db_size)) => {
@@ -95,14 +92,14 @@ pub fn scan(
         }
     }
 
-    if opts.clean_missing && !existing.is_empty() {
-        let stale = find_stale(
-            &existing
-                .values()
-                .map(|(p, _, _)| p.clone())
-                .collect::<Vec<_>>(),
-            &found,
-        );
+    // Prune only tracks whose file has genuinely disappeared from disk —
+    // scanning a *second* folder accumulates, it must not wipe other roots.
+    if opts.clean_missing {
+        let stale: Vec<String> = existing
+            .values()
+            .map(|(p, _, _)| p.clone())
+            .filter(|p| !Path::new(p).exists())
+            .collect();
         if !stale.is_empty() {
             report.removed = lib.delete_tracks(&stale)?;
         }

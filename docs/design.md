@@ -102,7 +102,7 @@ playlists(id, name, m3u_path)
 playlist_tracks(playlist_id, track_id, position)
 ```
 - FTS5 untuk pencarian; scanner **inkremental** (hanya file dengan `modified_at` berubah).
-- **Amendemen M1:** M1 mengimplementasikan `tracks` + `tracks_fts` (external-content + trigger); tabel `albums`/`artists`/`playlists` menyusul di M4 (UI browse) — migrasi per versi `user_version`. Format diambil dari ekstensi file; `cover_path` diisi di M3/M4. Scanner salah-baca file (corrupt) → dihitung `errors`, tidak crash, di-*retry* tiap scan (A6).
+- **Amendemen M1:** M1 mengimplementasikan `tracks` + `tracks_fts` (external-content + trigger); tabel `albums`/`artists`/`playlists` menyusul di M4 (UI browse) — migrasi per versi `user_version`. Format diambil dari ekstensi file; cover art thumbnail ditampilkan on-demand (`read_cover` → data URL, cache sesi frontend), cache disk `cover_path` menyusul di M3/M4. Scan folder kedua **menumpuk** (multi-root); pemangkasan hanya untuk file yang benar-benar hilang dari disk (`clean_missing` = cek `exists`), bukan "di luar root terakhir". Scanner salah-baca file (corrupt) → dihitung `errors`, tidak crash, di-*retry* tiap scan (A6).
 - Folder browse: view langsung struktur folder, baca tag on-the-fly + cache tipis.
 - Tag editor: FLAC (Vorbis), MP3 (ID3v2), M4A, OGG, WavPack, AIFF, DSF/DFF; backup `.bak` sebelum tulis; via `lofty`.
 - Playlist: internal SQLite + impor/ekspor `.m3u`; queue sesi (drag-reorder, save-as-playlist).

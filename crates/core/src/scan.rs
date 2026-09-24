@@ -45,25 +45,6 @@ pub fn classify_file(
     }
 }
 
-/// Normalize a path string for stable comparison (lowercase).
-fn normalize_path(p: &str) -> String {
-    p.to_lowercase()
-}
-
-/// Given every path currently in the DB (`existing`) and every path found by
-/// the walk (`found`), return the DB paths that no longer exist on disk.
-/// Comparison is case-insensitive and whitespace-untrimmed; callers should
-/// pass paths that are already absolute and normalized in shape.
-pub fn find_stale(existing: &[String], found: &[String]) -> Vec<String> {
-    let found_set: std::collections::HashSet<String> =
-        found.iter().map(|p| normalize_path(p)).collect();
-    existing
-        .iter()
-        .filter(|p| !found_set.contains(&normalize_path(p)))
-        .cloned()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,19 +89,5 @@ mod tests {
             classify_file(Some(100), Some(99), 100, 10),
             FileState::Changed
         );
-    }
-
-    #[test]
-    fn stale_finds_removed_files_case_insensitively() {
-        let existing = vec!["a.flac".into(), "b.mp3".into(), "c.flac".into()];
-        let found = vec!["A.FLAC".into(), "c.flac".into()];
-        assert_eq!(find_stale(&existing, &found), vec!["b.mp3".to_string()]);
-    }
-
-    #[test]
-    fn stale_empty_when_all_present() {
-        let existing = vec!["a.flac".into()];
-        let found = vec!["a.flac".into()];
-        assert!(find_stale(&existing, &found).is_empty());
     }
 }

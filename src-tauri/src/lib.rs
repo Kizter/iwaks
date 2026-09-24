@@ -42,6 +42,21 @@ fn search_tracks(query: String, state: State<'_, AppState>) -> Result<Vec<Track>
     lib.search(&query).map_err(|e| e.to_string())
 }
 
+/// Album art for a track file as a `data:` URL (`None` when the file has no
+/// embedded picture or cannot be read). Loaded on demand for visible rows.
+#[tauri::command]
+fn read_cover(path: String) -> Option<String> {
+    use base64::Engine as _;
+    let cover = iwaks_tags::cover::read_cover(std::path::Path::new(&path))
+        .ok()
+        .flatten()?;
+    Some(format!(
+        "data:{};base64,{}",
+        cover.mime,
+        base64::engine::general_purpose::STANDARD.encode(&cover.data)
+    ))
+}
+
 /// Kick off a background incremental scan of `path`. Emits `scan-started`,
 /// `scan-progress` (with `finished: false`), then a final `scan-progress`
 /// with `finished: true` or a `scan-error` event.
@@ -118,7 +133,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_tracks,
             search_tracks,
-            scan_folder
+            scan_folder,
+            read_cover
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
