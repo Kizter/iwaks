@@ -6,8 +6,8 @@ Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WA
 
 ## Features (roadmap)
 
-- ✅ **M0** — Scaffold, CI, benchmark baseline, branding *(current)*
-- ⏳ **M1** — Library core, SQLite scanner, search
+- ✅ **M0** — Scaffold, CI, benchmark baseline, branding
+- ✅ **M1** — Library core, SQLite scanner, FTS5 search, library UI *(current)*
 - ⏳ **M2** — Playback (libmpv), player bar
 - ⏳ **M3** — EQ, ReplayGain, sleep timer, playback speed, visualizer, lyrics
 - ⏳ **M4** — Playlists, queue, folder browse, tag editor

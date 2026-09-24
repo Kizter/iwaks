@@ -1,0 +1,9 @@
+[package]
+name = "iwaks-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pure domain logic for Iwaks (no I/O)"
+
+[dependencies]
+serde.workspace = true

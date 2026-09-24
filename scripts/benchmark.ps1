@@ -1,4 +1,4 @@
-# Measures MusicForge build-pipeline timings and stores them as a baseline.
+# Measures Iwaks build-pipeline timings and stores them as a baseline.
 # Usage:
 #   ./scripts/benchmark.ps1 baseline   # record current timings
 #   ./scripts/benchmark.ps1 compare    # compare against saved baseline
@@ -27,10 +27,11 @@ function Invoke-Measured([scriptblock]$Block) {
 }
 
 $npmBuild = Invoke-Measured { npm run build }
-$cargoCheck = Invoke-Measured { & $cargo check --manifest-path src-tauri/Cargo.toml }
+# Workspace root (crates/core, crates/library, crates/tags, src-tauri).
+$cargoCheck = Invoke-Measured { & $cargo check --workspace }
 
 if ($Mode -eq "baseline") {
-    $cargoTest = Invoke-Measured { & $cargo test --manifest-path src-tauri/Cargo.toml }
+    $cargoTest = Invoke-Measured { & $cargo test --workspace }
 }
 
 $current = @{

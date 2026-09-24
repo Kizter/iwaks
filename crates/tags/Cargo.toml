@@ -1,0 +1,11 @@
+[package]
+name = "iwaks-tags"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Audio tag reading/writing via lofty"
+
+[dependencies]
+iwaks-core.workspace = true
+lofty.workspace = true
+thiserror.workspace = true

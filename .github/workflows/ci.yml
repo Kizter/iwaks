@@ -28,14 +28,11 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: cargo fmt
-        working-directory: src-tauri
-        run: cargo fmt --check
+      - name: cargo fmt (workspace)
+        run: cargo fmt --all -- --check
 
-      - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy -- -D warnings
+      - name: cargo clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo test
-        working-directory: src-tauri
-        run: cargo test
+      - name: cargo test (workspace)
+        run: cargo test --workspace

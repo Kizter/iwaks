@@ -102,6 +102,7 @@ playlists(id, name, m3u_path)
 playlist_tracks(playlist_id, track_id, position)
 ```
 - FTS5 untuk pencarian; scanner **inkremental** (hanya file dengan `modified_at` berubah).
+- **Amendemen M1:** M1 mengimplementasikan `tracks` + `tracks_fts` (external-content + trigger); tabel `albums`/`artists`/`playlists` menyusul di M4 (UI browse) — migrasi per versi `user_version`. Format diambil dari ekstensi file; `cover_path` diisi di M3/M4. Scanner salah-baca file (corrupt) → dihitung `errors`, tidak crash, di-*retry* tiap scan (A6).
 - Folder browse: view langsung struktur folder, baca tag on-the-fly + cache tipis.
 - Tag editor: FLAC (Vorbis), MP3 (ID3v2), M4A, OGG, WavPack, AIFF, DSF/DFF; backup `.bak` sebelum tulis; via `lofty`.
 - Playlist: internal SQLite + impor/ekspor `.m3u`; queue sesi (drag-reorder, save-as-playlist).
@@ -112,7 +113,7 @@ playlist_tracks(playlist_id, track_id, position)
 - Prinsip skill: kontras WCAG AA, semua state ada (loading/empty/error), motion `cubic-bezier(0.23,1,0.32,1)` + `prefers-reduced-motion`, anti-template generik, art sebagai elemen hero.
 - Visualizer: decode paralel symphonia untuk FFT (sinkron via timestamp) → 60–120 bin → event Tauri 30fps (throttle) → render canvas/SVG (bar + ring).
 - Lirik: embedded USLT / Vorbis `LYRICS` / `.lrc` samping lagu; highlight sinkron.
-- Kinerja: virtual list (react-window) utk daftar >500 baris, debounce search, lazy-load cover + cache disk.
+- Kinerja: virtual list (hand-rolled fixed-row, menghindari dep react-window/peer-dep React 19; M1) utk daftar >500 baris, debounce search, lazy-load cover + cache disk.
 
 ### 4.5 Casting
 

@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/core", "crates/library", "crates/tags"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+iwaks-core = { path = "crates/core" }
+iwaks-library = { path = "crates/library" }
+iwaks-tags = { path = "crates/tags" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+lofty = "0.22"
+rusqlite = { version = "0.37", features = ["bundled"] }
+walkdir = "2"
+
+# Shared release profile (was previously in src-tauri/Cargo.toml).
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -1,0 +1,14 @@
+[package]
+name = "iwaks-library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SQLite library storage, FTS5 search, background scanner"
+
+[dependencies]
+iwaks-core.workspace = true
+iwaks-tags.workspace = true
+rusqlite.workspace = true
+walkdir.workspace = true
+thiserror.workspace = true
+serde.workspace = true
