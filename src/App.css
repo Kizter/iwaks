@@ -869,6 +869,41 @@ input[type="range"].eq-slider::-moz-range-thumb {
   overflow-y: auto;
 }
 
+/* ---- Visualizer popover ---- */
+
+.viz-wrap {
+  position: relative;
+}
+
+.viz-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: 360px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
+}
+
+.viz-canvas {
+  display: block;
+  width: 100%;
+  height: 150px;
+  border-radius: 8px;
+  background: #f0f4e6;
+}
+
+.viz-empty {
+  margin: 0;
+  padding: 44px 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
 .pb-time {
   display: flex;
   align-items: center;

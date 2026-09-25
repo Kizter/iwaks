@@ -6,6 +6,7 @@ use iwaks_core::track::Track;
 use iwaks_library::db::Library;
 use iwaks_library::scan::{scan, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
+use iwaks_visualizer::{Spectrum, SpectrumCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -16,6 +17,7 @@ pub struct AppState {
     db_path: PathBuf,
     scanning: Arc<AtomicBool>,
     player: Arc<Mutex<Option<Arc<Player>>>>,
+    spectrum: SpectrumCache,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -75,6 +77,33 @@ fn get_lyrics(path: String) -> Option<iwaks_tags::lyrics::Lyrics> {
     iwaks_tags::lyrics::read_lyrics(std::path::Path::new(&path))
         .ok()
         .flatten()
+}
+
+/// Spectrum timeline for the visualizer. `Err` when the file can't be decoded
+/// (unsupported format — Opus/WavPack/WMA/DSD have no symphonia decoder).
+/// Decoding runs on a blocking worker thread; `SpectrumCache` makes re-opening
+/// the same track instant. (Async commands borrowing state must return
+/// `Result`.)
+#[tauri::command]
+async fn get_spectrum(state: State<'_, AppState>, path: String) -> Result<Spectrum, String> {
+    let p = PathBuf::from(&path);
+    if let Some(cached) = state.spectrum.get(&p) {
+        return Ok(cached);
+    }
+    let task = p.clone();
+    let decoded = tauri::async_runtime::spawn_blocking(move || {
+        iwaks_visualizer::analyze(
+            &task,
+            iwaks_visualizer::DEFAULT_FPS,
+            iwaks_visualizer::DEFAULT_BINS,
+        )
+        .ok()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "No spectrum for this track".to_string())?;
+    state.spectrum.put(&p, decoded.clone());
+    Ok(decoded)
 }
 
 /// Kick off a background incremental scan of `path`. Emits `scan-started`,
@@ -287,6 +316,7 @@ pub fn run() {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
                 player: Arc::new(Mutex::new(player)),
+                spectrum: SpectrumCache::default(),
             });
             Ok(())
         })
@@ -310,7 +340,8 @@ pub fn run() {
             set_replaygain,
             stop_playback,
             get_player_state,
-            get_lyrics
+            get_lyrics,
+            get_spectrum
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

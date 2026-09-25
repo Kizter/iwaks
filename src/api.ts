@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
+import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Spectrum, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -107,6 +107,15 @@ export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {
 /** Lyrics for a track (embedded / `.lrc` sidecar), or `null` when absent. */
 export function getLyrics(path: string): Promise<Lyrics | null> {
   return invoke<Lyrics | null>("get_lyrics", { path });
+}
+
+/** Spectrum timeline for the visualizer, or `null` when not decodable. */
+export async function getSpectrum(path: string): Promise<Spectrum | null> {
+  try {
+    return await invoke<Spectrum>("get_spectrum", { path });
+  } catch {
+    return null;
+  }
 }
 
 export function playerStop(): Promise<void> {

@@ -76,3 +76,10 @@ export interface Lyrics {
   timed: LyricsLine[];
   plain: string | null;
 }
+
+/** Mirrors iwaks_visualizer::Spectrum (frames indexed [frame][bin], 0..1). */
+export interface Spectrum {
+  fps: number;
+  bins: number;
+  frames: number[][];
+}

@@ -3,6 +3,7 @@ import { Cover } from "./Cover";
 import { formatDuration } from "./format";
 import {
   getLyrics,
+  getSpectrum,
   playerNext,
   playerPrev,
   playerSeek,
@@ -15,7 +16,7 @@ import {
   playerToggleMute,
   playerTogglePlay,
 } from "./api";
-import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode } from "./types";
+import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, Spectrum } from "./types";
 
 const REPEAT_ORDER: RepeatMode[] = ["off", "all", "one"];
 const REPEAT_TITLE: Record<RepeatMode, string> = {
@@ -63,6 +64,17 @@ function LyricsIcon() {
       <path
         fill="currentColor"
         d="M2 3.4h12v1.6H2zM2 7.2h12v1.6H2zM2 11h8v1.6H2z"
+      />
+    </svg>
+  );
+}
+
+function VizIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M1.6 6.4h1.9v3.2H1.6zM4.7 4.4h1.9v7.2H4.7zM7.8 1.9h1.9v12.2H7.8zM10.9 4.4h1.9v7.2h-1.9zM13.9 6.4h1.9v3.2h-1.9z"
       />
     </svg>
   );
@@ -132,6 +144,8 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(undefined);
+  const [vizOpen, setVizOpen] = useState(false);
+  const [spectrum, setSpectrum] = useState<Spectrum | null | undefined>(undefined);
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
   const playing = hasTrack && !state!.paused && !state!.stopped;
@@ -198,6 +212,96 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
       });
     }
   }, [activeIdx]);
+
+  // ---- visualizer: fetch the spectrum timeline for the current track ----
+  const vizPath = cur?.path ?? null;
+  useEffect(() => {
+    if (!vizOpen || !vizPath) {
+      setSpectrum(undefined);
+      return;
+    }
+    let cancelled = false;
+    setSpectrum(undefined); // analyzing
+    void getSpectrum(vizPath).then((s) => {
+      if (!cancelled) setSpectrum(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [vizOpen, vizPath]);
+
+  // Smoothed bar magnitudes persist across re-runs so ~10 Hz state ticks
+  // don't reset the bars; canvas size is re-applied only when it changes.
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const vizBars = useRef<Float32Array | null>(null);
+  const vizSize = useRef({ w: 0, h: 0, dpr: 0 });
+  useEffect(() => {
+    if (!vizOpen || !state || !spectrum || spectrum.frames.length === 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const { frames, fps, bins } = spectrum;
+    if (!vizBars.current || vizBars.current.length !== bins) {
+      vizBars.current = new Float32Array(bins);
+    }
+    const current = vizBars.current;
+    const target = new Float32Array(bins);
+
+    let lastPos = state.position;
+    let lastWall = performance.now();
+    let playing = !state.paused && !state.stopped;
+    let speed = state.speed;
+    let raf = 0;
+
+    const draw = (now: number) => {
+      // Extrapolate position between ~10 Hz state ticks while playing.
+      if (playing && now > lastWall) {
+        lastPos += ((now - lastWall) / 1000) * speed;
+      }
+      lastWall = now;
+
+      const fi = Math.min(frames.length - 1, Math.max(0, Math.floor(lastPos * fps)));
+      const frame = frames[fi];
+      if (playing) {
+        for (let i = 0; i < bins; i++) target[i] = frame[i] ?? 0;
+      } else {
+        target.fill(0);
+      }
+      // Fast attack when a bar rises, slower release when it falls.
+      for (let i = 0; i < bins; i++) {
+        current[i] += (target[i] - current[i]) * (target[i] > current[i] ? 0.55 : 0.12);
+      }
+
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const size = vizSize.current;
+      if (size.w !== w || size.h !== h || size.dpr !== dpr) {
+        vizSize.current = { w, h, dpr };
+        canvas.width = Math.max(1, Math.floor(w * dpr));
+        canvas.height = Math.max(1, Math.floor(h * dpr));
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const slot = w / bins;
+      const bw = Math.max(2, slot * 0.62);
+      const grad = ctx.createLinearGradient(0, h, 0, 0);
+      grad.addColorStop(0, "#8fd6e8");
+      grad.addColorStop(0.55, "#3f9fc9");
+      grad.addColorStop(1, "#026aa7");
+      ctx.fillStyle = grad;
+      for (let i = 0; i < bins; i++) {
+        const bh = 2 + current[i] * (h - 8);
+        ctx.fillRect(i * slot + (slot - bw) / 2, h - bh, bw, bh);
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [vizOpen, state, spectrum]);
 
   const commitSeek = () => {
     if (drag !== null) {
@@ -463,6 +567,33 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
                 </div>
               ) : (
                 <pre className="lyr-plain">{lyrics.plain}</pre>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="viz-wrap">
+          <button
+            className="icon-btn"
+            onClick={() => setVizOpen((o) => !o)}
+            disabled={!state}
+            title="Visualizer"
+            aria-label="Visualizer"
+            aria-expanded={vizOpen}
+          >
+            <VizIcon />
+          </button>
+          {vizOpen && state && (
+            <div className="viz-pop" role="group" aria-label="Visualizer panel">
+              {spectrum === undefined ? (
+                <p className="viz-empty">Analyzing…</p>
+              ) : spectrum === null || spectrum.frames.length === 0 ? (
+                <p className="viz-empty">No spectrum for this track</p>
+              ) : (
+                <canvas
+                  ref={canvasRef}
+                  className="viz-canvas"
+                  aria-label="Spectrum visualizer"
+                />
               )}
             </div>
           )}
