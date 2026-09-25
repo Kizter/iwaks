@@ -1,6 +1,6 @@
 # 🐟 Iwaks
 
-**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop, with the DIY charm of Indonesian indie (Crayoncase-inspired theme, fish mascot).
+**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop, 
 
 Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WASAPI (bit-perfect)**.
 
