@@ -82,6 +82,88 @@ pub struct PlayerState {
     pub speed: f64,
     /// Seconds left on the sleep timer; `None` when no timer is armed.
     pub sleep_remaining: Option<f64>,
+    /// Master gain (dB) applied after the EQ bands (slider range ±12 dB).
+    pub eq_preamp: f64,
+    /// 10 band gains (dB) at [`EQ_BANDS`] frequencies; all zeros = flat.
+    pub eq: Vec<f64>,
+    /// ReplayGain mode applied by libmpv.
+    pub replaygain: ReplayGainMode,
+}
+
+/// ReplayGain mode (libmpv `replaygain` option).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplayGainMode {
+    #[default]
+    Track,
+    Album,
+    Off,
+}
+
+impl ReplayGainMode {
+    fn as_mpv(self) -> &'static str {
+        match self {
+            Self::Track => "track",
+            Self::Album => "album",
+            // mpv's choice values are `no|track|album` (no `off` alias).
+            Self::Off => "no",
+        }
+    }
+
+    fn from_mpv(value: &str) -> Self {
+        match value {
+            "album" => Self::Album,
+            "off" | "no" => Self::Off,
+            _ => Self::Track,
+        }
+    }
+}
+
+/// ISO standard 10-band graphic-EQ center frequencies, in Hz.
+pub const EQ_BANDS: [u32; 10] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+/// Last-applied EQ settings (the value the frontend sees in state).
+#[derive(Debug, Clone, PartialEq)]
+struct EqSettings {
+    preamp: f64,
+    gains: Vec<f64>,
+}
+
+impl Default for EqSettings {
+    fn default() -> Self {
+        Self {
+            preamp: 0.0,
+            gains: vec![0.0; EQ_BANDS.len()],
+        }
+    }
+}
+
+/// Clamp a dB value to the EQ range and snap it to 0.1 dB steps.
+fn clamp_db(value: f64) -> f64 {
+    let v = value.clamp(-12.0, 12.0);
+    (v * 10.0).round() / 10.0
+}
+
+/// Build the `af` lavfi graph for the EQ; `None` when the net effect is flat.
+/// Per-band `equalizer` filters use octave width; the master `preamp` gain is
+/// applied last (`volume` filter) so it acts as a post-EQ master volume.
+fn eq_af_chain(preamp: f64, gains: &[f64]) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for (freq, gain) in EQ_BANDS.iter().zip(gains) {
+        let g = clamp_db(*gain);
+        if g != 0.0 {
+            parts.push(format!("equalizer=f={freq}:t=o:w=1:g={g}"));
+        }
+    }
+    let p = clamp_db(preamp);
+    if p != 0.0 {
+        parts.push(format!("volume=volume={p}dB"));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("lavfi=[{}]", parts.join(",")))
+    }
 }
 
 /// Receives a fresh [`PlayerState`] after every change and each pump tick.
@@ -98,6 +180,8 @@ enum Cmd {
     SetVolume(i64),
     ToggleMute,
     SetSpeed(f64),
+    SetEq { preamp: f64, gains: Vec<f64> },
+    SetReplayGain(ReplayGainMode),
     Stop,
     SleepElapsed,
     Refresh,
@@ -117,6 +201,10 @@ pub struct Player {
     commands: Mutex<VecDeque<Cmd>>,
     /// When set, the pump pauses playback once `Instant::now()` passes it.
     sleep_deadline: Mutex<Option<Instant>>,
+    /// Last-applied graphic EQ settings (pump-side source of truth).
+    eq: Mutex<EqSettings>,
+    /// Last-requested ReplayGain mode; fallback when the property read fails.
+    replaygain: Mutex<ReplayGainMode>,
     thread: Mutex<Option<JoinHandle<()>>>,
     stopped: AtomicBool,
     shut_down: AtomicBool,
@@ -142,12 +230,17 @@ impl Player {
                 repeat: RepeatMode::Off,
                 speed: 1.0,
                 sleep_remaining: None,
+                eq_preamp: 0.0,
+                eq: vec![0.0; EQ_BANDS.len()],
+                replaygain: ReplayGainMode::Track,
             }),
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
             sink: Mutex::new(Some(sink)),
             commands: Mutex::new(VecDeque::new()),
             sleep_deadline: Mutex::new(None),
+            eq: Mutex::new(EqSettings::default()),
+            replaygain: Mutex::new(ReplayGainMode::Track),
             thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
             shut_down: AtomicBool::new(false),
@@ -203,6 +296,13 @@ impl Player {
         apply("volume-max", "100")?;
         apply("keep-open", "no")?;
         apply("gapless-audio", "yes")?;
+        // ReplayGain on by default (design §4.2: `replaygain=track`); the mode
+        // is switchable at runtime (`set replaygain <mode>`), read back each
+        // tick, and applied from the next loaded file onward.
+        apply("replaygain", ReplayGainMode::Track.as_mpv())?;
+        apply("replaygain-preamp", "0")?;
+        apply("replaygain-clip", "yes")?;
+        apply("replaygain-fallback", "0")?;
         let _ = api.set_option("audio-resampler", "soxr"); // optional build; harmless
         if let Ok(level) = std::env::var("IWAKS_MPV_LOG") {
             let _ = api.request_log_messages(&level); // debug hook
@@ -273,6 +373,27 @@ impl Player {
             .map(|s| Instant::now() + Duration::from_secs_f64(s));
         *self.sleep_deadline.lock().unwrap() = deadline;
         self.push(Cmd::Refresh);
+    }
+
+    /// Graphic EQ: master `preamp` plus 10 band gains (dB, ±12, 0.1 steps).
+    /// Gains are clamped to [`EQ_BANDS`] length; missing bands read as 0 dB.
+    pub fn set_eq(&self, preamp: f64, gains: Vec<f64>) {
+        let clamped: Vec<f64> = gains
+            .iter()
+            .take(EQ_BANDS.len())
+            .map(|g| clamp_db(*g))
+            .collect();
+        let mut padded = vec![0.0; EQ_BANDS.len()];
+        padded[..clamped.len()].copy_from_slice(&clamped);
+        self.push(Cmd::SetEq {
+            preamp: clamp_db(preamp),
+            gains: padded,
+        });
+    }
+
+    /// ReplayGain mode; applied by libmpv from the next loaded file onward.
+    pub fn set_replaygain(&self, mode: ReplayGainMode) {
+        self.push(Cmd::SetReplayGain(mode));
     }
 
     pub fn set_repeat(&self, repeat: RepeatMode) {
@@ -392,6 +513,31 @@ impl Player {
             Cmd::SetSpeed(speed) => {
                 let api = self.api();
                 let _ = api.command(&["set", "speed", &speed.to_string()]);
+                self.emit();
+            }
+            Cmd::SetEq { preamp, gains } => {
+                // Stores the requested EQ first so state matches even if the
+                // `af` reconfiguration fails for some reason.
+                *self.eq.lock().unwrap() = EqSettings {
+                    preamp,
+                    gains: gains.clone(),
+                };
+                let api = self.api();
+                match eq_af_chain(preamp, &gains) {
+                    Some(chain) => {
+                        let _ = api.command(&["set", "af", &chain]);
+                    }
+                    None => {
+                        // Flat EQ → drop the whole filter chain.
+                        let _ = api.command(&["set", "af", ""]);
+                    }
+                }
+                self.emit();
+            }
+            Cmd::SetReplayGain(mode) => {
+                *self.replaygain.lock().unwrap() = mode;
+                let api = self.api();
+                let _ = api.command(&["set", "replaygain", mode.as_mpv()]);
                 self.emit();
             }
             Cmd::Stop => {
@@ -549,6 +695,15 @@ impl Player {
             .lock()
             .unwrap()
             .map(|until| (until - Instant::now()).as_secs_f64().max(0.0));
+        let (eq_preamp, eq) = {
+            let e = self.eq.lock().unwrap();
+            (e.preamp, e.gains.clone())
+        };
+        let stored_rg = *self.replaygain.lock().unwrap();
+        let replaygain = api
+            .get_string("replaygain")
+            .map(|value| ReplayGainMode::from_mpv(&value))
+            .unwrap_or(stored_rg);
         let (queue, tracks) = {
             // Same order as `play_index` (queue → tracks) to avoid ABBA.
             let q = self.queue.lock().unwrap();
@@ -569,6 +724,9 @@ impl Player {
             repeat: queue.repeat,
             speed,
             sleep_remaining,
+            eq_preamp,
+            eq,
+            replaygain,
         }
     }
 }
@@ -867,6 +1025,120 @@ mod tests {
         // Wait past the original deadline: playback must keep going.
         std::thread::sleep(Duration::from_millis(600));
         assert!(!player.snapshot().paused, "cancelled timer must not pause");
+        player.shutdown();
+    }
+
+    // ---- EQ + ReplayGain (slice 2) ----
+
+    #[test]
+    fn eq_af_chain_flat_is_none() {
+        assert_eq!(eq_af_chain(0.0, &[0.0; EQ_BANDS.len()]), None);
+        // Sub-0.05 dB values round to flat.
+        assert_eq!(eq_af_chain(0.04, &[0.01; EQ_BANDS.len()]), None);
+    }
+
+    #[test]
+    fn eq_af_chain_builds_lavfi_graph() {
+        let mut gains = [0.0; EQ_BANDS.len()];
+        gains[5] = 2.0; // 1 kHz band
+        let chain = eq_af_chain(3.0, &gains).expect("non-flat gains produce a chain");
+        assert!(chain.starts_with("lavfi=["));
+        assert!(chain.contains("equalizer=f=1000:t=o:w=1:g=2"));
+        assert!(chain.ends_with("volume=volume=3dB]"), "preamp applied last");
+        assert_eq!(
+            chain.matches("equalizer=").count(),
+            1,
+            "only the boosted band is included"
+        );
+    }
+
+    #[test]
+    fn eq_af_chain_clamps_and_rounds() {
+        let mut gains = [0.0; EQ_BANDS.len()];
+        gains[0] = 99.0;
+        gains[1] = -0.04; // rounds to 0 dB → excluded
+        let chain = eq_af_chain(-99.0, &gains).expect("chain for out-of-range preamp");
+        assert!(chain.contains("equalizer=f=31:t=o:w=1:g=12"));
+        assert!(chain.contains("volume=volume=-12dB"));
+        assert!(!chain.contains("f=62"), "sub-0.05 band is dropped");
+    }
+
+    #[test]
+    fn replaygain_mode_roundtrip() {
+        if !have_libmpv() {
+            return;
+        }
+        let player = start_player();
+        // Startup option `replaygain=track` (design §4.2) is the default.
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.replaygain == ReplayGainMode::Track
+        })
+        .expect("default mode is Track");
+
+        player.set_replaygain(ReplayGainMode::Album);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.replaygain == ReplayGainMode::Album
+        })
+        .expect("switches to Album");
+        player.set_replaygain(ReplayGainMode::Off);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.replaygain == ReplayGainMode::Off
+        })
+        .expect("switches to Off");
+        player.shutdown();
+    }
+
+    #[test]
+    fn eq_applies_filter_and_clears_without_breaking_playback() {
+        if !have_libmpv() {
+            return;
+        }
+        let a = test_dir("eq").join("a.wav");
+        write_wav(&a, 2.0);
+        let tracks = vec![track(a.to_str().unwrap(), "A", 2.0)];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("starts playing");
+
+        // Boost band 5 (1 kHz) + preamp, plus out-of-range values to prove
+        // clamping and padding happen.
+        let mut gains = vec![0.0; EQ_BANDS.len()];
+        gains[5] = 2.5;
+        player.set_eq(99.0, gains);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.eq_preamp == 12.0 && s.eq[5] == 2.5
+        })
+        .expect("EQ stored with clamped preamp");
+
+        // A short (2 s) gain array is padded with zeros to 10 bands.
+        player.set_eq(0.0, vec![1.0, -2.0]);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.eq_preamp == 0.0 && s.eq.len() == EQ_BANDS.len() && s.eq[1] == -2.0 && s.eq[9] == 0.0
+        })
+        .expect("padded to 10 bands");
+
+        // Playback keeps advancing while the filter chain is active…
+        let base = player.snapshot().position;
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.position > base + 0.25
+        })
+        .expect("position advances with the lavfi chain");
+
+        // …and survives clearing back to flat (`set af ""`).
+        player.set_eq(0.0, vec![0.0; EQ_BANDS.len()]);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.eq.iter().all(|g| *g == 0.0) && s.eq_preamp == 0.0
+        })
+        .expect("EQ reset to flat");
+        let base = player.snapshot().position;
+        wait_for(&player, Duration::from_secs(2), |s| {
+            !s.paused && s.position > base + 0.25
+        })
+        .expect("playback intact after clearing the chain");
         player.shutdown();
     }
 }

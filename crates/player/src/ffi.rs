@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use libloading::Library;
 
 /// `mpv_format` values used by the getters below.
+pub const FORMAT_STRING: c_int = 1;
 pub const FORMAT_FLAG: c_int = 3;
 pub const FORMAT_INT64: c_int = 4;
 pub const FORMAT_DOUBLE: c_int = 5;
@@ -108,6 +109,7 @@ type CommandFn = unsafe extern "C" fn(*mut c_void, *const *const c_char) -> c_in
 type WaitEventFn = unsafe extern "C" fn(*mut c_void, f64) -> *const RawEvent;
 type WakeupFn = unsafe extern "C" fn(*mut c_void);
 type RequestLogFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> c_int;
+type FreeFn = unsafe extern "C" fn(*mut c_void);
 
 /// Runtime-loaded libmpv handle plus the bound symbols.
 ///
@@ -124,6 +126,7 @@ pub struct Mpv {
     wait_event: WaitEventFn,
     wakeup: WakeupFn,
     request_log: RequestLogFn,
+    mpv_free: FreeFn,
 }
 
 // SAFETY: see module docs — libmpv's client API is thread-safe; the handle is
@@ -189,6 +192,7 @@ impl Mpv {
             let request_log: RequestLogFn = *lib
                 .get(b"mpv_request_log_messages")
                 .map_err(|e| format!("mpv_request_log_messages: {e}"))?;
+            let mpv_free: FreeFn = *lib.get(b"mpv_free").map_err(|e| format!("mpv_free: {e}"))?;
             let create: CreateFn = *lib
                 .get(b"mpv_create")
                 .map_err(|e| format!("mpv_create: {e}"))?;
@@ -209,6 +213,7 @@ impl Mpv {
                 wait_event,
                 wakeup,
                 request_log,
+                mpv_free,
             })
         }
     }
@@ -266,6 +271,26 @@ impl Mpv {
         } else {
             Ok(out)
         }
+    }
+
+    /// Read a string property. The string is allocated by mpv and freed via
+    /// `mpv_free` — the returned `String` is always an owned copy.
+    pub fn get_string(&self, name: &str) -> Result<String, c_int> {
+        let mut out: *mut c_char = std::ptr::null_mut();
+        let rc = self.get_prop(name, FORMAT_STRING, (&mut out as *mut *mut c_char).cast());
+        if rc < 0 {
+            return Err(rc);
+        }
+        if out.is_null() {
+            return Ok(String::new());
+        }
+        // SAFETY: mpv set `out` to a NUL-terminated string we must free.
+        let text = unsafe { std::ffi::CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
+        // SAFETY: the pointer came from mpv (owing) and is freed once.
+        unsafe { (self.mpv_free)(out.cast()) };
+        Ok(text)
     }
 
     pub fn get_flag(&self, name: &str) -> Result<bool, c_int> {
@@ -384,5 +409,36 @@ mod tests {
         assert_eq!(EndFileReason::from_raw(3), EndFileReason::Error);
         assert_eq!(EndFileReason::from_raw(4), EndFileReason::Redirect);
         assert_eq!(EndFileReason::from_raw(99), EndFileReason::Other(99));
+    }
+
+    #[test]
+    fn replaygain_and_af_are_runtime_settable() {
+        let api = match Mpv::new() {
+            Ok(a) => a,
+            Err(_) => {
+                eprintln!("SKIP: no libmpv DLL on this machine");
+                return;
+            }
+        };
+        api.set_option("idle", "yes").unwrap();
+        api.set_option("ao", "null").unwrap();
+        api.set_option("vo", "null").unwrap();
+        api.set_option("replaygain", "track").unwrap();
+        api.initialize().unwrap();
+
+        // ReplayGain mode: the option is readable and switchable at runtime.
+        assert_eq!(api.get_string("replaygain").unwrap(), "track");
+        api.command(&["set", "replaygain", "album"]).unwrap();
+        assert_eq!(api.get_string("replaygain").unwrap(), "album");
+        // mpv's off value is `no` (not `off`).
+        api.command(&["set", "replaygain", "no"]).unwrap();
+        assert_eq!(api.get_string("replaygain").unwrap(), "no");
+
+        // `af` accepts a lavfi graph and an empty string clears it.
+        api.command(&["set", "af", "lavfi=[equalizer=f=1000:t=o:w=1:g=3.0]"])
+            .unwrap();
+        assert!(api.get_string("af").unwrap().contains("equalizer"));
+        api.command(&["set", "af", ""]).unwrap();
+        assert_eq!(api.get_string("af").unwrap(), "");
     }
 }

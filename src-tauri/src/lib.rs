@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use iwaks_core::track::Track;
 use iwaks_library::db::Library;
 use iwaks_library::scan::{scan, ScanOptions, ScanProgress};
-use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode};
+use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -204,6 +204,23 @@ fn set_sleep_timer(seconds: Option<f64>, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+/// Graphic EQ: `preamp` dB master gain + 10 band gains (`eq`, dB).
+#[tauri::command]
+fn set_eq(preamp: f64, eq: Vec<f64>, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_eq(preamp, eq);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_replaygain(mode: ReplayGainMode, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_replaygain(mode);
+    Ok(())
+}
+
 #[tauri::command]
 fn set_repeat(repeat: RepeatMode, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
@@ -280,6 +297,8 @@ pub fn run() {
             set_repeat,
             set_speed,
             set_sleep_timer,
+            set_eq,
+            set_replaygain,
             stop_playback,
             get_player_state
         ])

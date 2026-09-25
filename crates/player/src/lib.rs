@@ -8,5 +8,5 @@ pub mod ffi;
 pub mod player;
 pub mod queue;
 
-pub use player::{Options, Player, PlayerState};
+pub use player::{Options, Player, PlayerState, ReplayGainMode};
 pub use queue::RepeatMode;

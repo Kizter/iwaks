@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { PlayerState, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
+import type { PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -93,6 +93,15 @@ export function playerSetSpeed(speed: number): Promise<void> {
 /** Arm the sleep timer (`null` cancels); playback pauses at the deadline. */
 export function playerSetSleepTimer(seconds: number | null): Promise<void> {
   return invoke<void>("set_sleep_timer", { seconds });
+}
+
+/** Graphic EQ: master `preamp` dB + 10 band gains (dB). */
+export function playerSetEq(preamp: number, gains: number[]): Promise<void> {
+  return invoke<void>("set_eq", { preamp, eq: gains });
+}
+
+export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {
+  return invoke<void>("set_replaygain", { mode });
 }
 
 export function playerStop(): Promise<void> {

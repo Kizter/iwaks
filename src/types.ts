@@ -54,4 +54,13 @@ export interface PlayerState {
   speed: number;
   /** Seconds left on the sleep timer, or `null` when none is armed. */
   sleepRemaining: number | null;
+  /** Master EQ gain in dB (±12). */
+  eqPreamp: number;
+  /** 10 band gains in dB at the ISO frequencies (all 0 = flat). */
+  eq: number[];
+  /** ReplayGain mode applied by libmpv. */
+  replaygain: ReplayGainMode;
 }
+
+/** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */
+export type ReplayGainMode = "off" | "track" | "album";

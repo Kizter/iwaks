@@ -673,6 +673,138 @@ body {
   white-space: nowrap;
 }
 
+/* ---- EQ popover ---- */
+
+.eq-wrap {
+  position: relative;
+}
+
+.eq-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eq-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.eq-reset {
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.eq-reset:hover {
+  background: var(--mint);
+}
+
+.eq-bands {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.eq-band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.eq-val {
+  font-size: 0.64rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.eq-freq {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+input[type="range"].eq-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 4px;
+  height: 96px;
+  border-radius: 999px;
+  background: var(--line);
+  cursor: pointer;
+  /* Vertical slider in Chromium/WebView2 */
+  writing-mode: vertical-lr;
+  direction: rtl;
+}
+
+input[type="range"].eq-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(2, 106, 167, 0.35);
+}
+
+input[type="range"].eq-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--surface);
+}
+
+.eq-preamp,
+.rg-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.eq-preamp-slider {
+  width: 90px;
+  height: 4px;
+  writing-mode: horizontal-tb;
+  direction: ltr;
+}
+
+.rg-ctl select {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
 .pb-time {
   display: flex;
   align-items: center;

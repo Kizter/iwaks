@@ -5,6 +5,8 @@ import {
   playerNext,
   playerPrev,
   playerSeek,
+  playerSetEq,
+  playerSetReplayGain,
   playerSetRepeat,
   playerSetSleepTimer,
   playerSetSpeed,
@@ -12,7 +14,7 @@ import {
   playerToggleMute,
   playerTogglePlay,
 } from "./api";
-import type { PlayerState, RepeatMode } from "./types";
+import type { PlayerState, ReplayGainMode, RepeatMode } from "./types";
 
 const REPEAT_ORDER: RepeatMode[] = ["off", "all", "one"];
 const REPEAT_TITLE: Record<RepeatMode, string> = {
@@ -32,6 +34,27 @@ const SLEEP_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "3600", label: "60 min" },
   { value: "5400", label: "90 min" },
 ];
+
+/** Labels for the 10 EQ bands (ISO frequencies, matches EQ_BANDS in Rust). */
+const EQ_LABELS = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+const EQ_ZERO = Array(EQ_LABELS.length).fill(0) as number[];
+
+function EqBarsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M2.5 3h3v10h-3zM6.5 6h3v7h-3zM10.5 2h3v11h-3z"
+      />
+    </svg>
+  );
+}
+
+/** Compact dB label: "0", "-3.5", "+6". */
+function fmtDb(v: number): string {
+  const s = Math.round(v * 10) / 10;
+  return `${s > 0 ? "+" : ""}${s}`;
+}
 
 function PlayIcon() {
   return (
@@ -93,6 +116,8 @@ function RepeatIcon({ mode }: { mode: RepeatMode }) {
 export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [drag, setDrag] = useState<number | null>(null);
   const [sleepChoice, setSleepChoice] = useState("off");
+  const [eqOpen, setEqOpen] = useState(false);
+  const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
   const playing = hasTrack && !state!.paused && !state!.stopped;
@@ -104,6 +129,10 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const mute = state?.mute ?? false;
   const speed = state?.speed ?? 1;
   const sleepRemaining = state?.sleepRemaining ?? null;
+  const eqPreamp = state?.eqPreamp ?? 0;
+  const eqGains = state?.eq ?? EQ_ZERO;
+  const shownPreamp = eqDraft ? eqDraft.preamp : eqPreamp;
+  const shownGain = (i: number) => (eqDraft ? eqDraft.gains[i] : eqGains[i]);
 
   // When the timer runs out or is cleared from elsewhere, the select snaps
   // back to "Off" instead of showing a stale countdown value.
@@ -130,6 +159,33 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
     if (!state) return;
     const i = Math.max(0, SPEEDS.indexOf(state.speed));
     void playerSetSpeed(SPEEDS[(i + 1) % SPEEDS.length]);
+  };
+
+  // ---- EQ draft: sliders edit locally, one commit on release ----
+  const eqBase = () => (eqDraft ?? { preamp: eqPreamp, gains: [...eqGains] });
+
+  const setEqBand = (i: number, v: number) => {
+    const base = eqBase();
+    const gains = [...base.gains];
+    gains[i] = v;
+    setEqDraft({ preamp: base.preamp, gains });
+  };
+
+  const setEqPreamp = (v: number) => {
+    const base = eqBase();
+    setEqDraft({ preamp: v, gains: base.gains });
+  };
+
+  const commitEq = () => {
+    if (eqDraft) {
+      void playerSetEq(eqDraft.preamp, eqDraft.gains);
+      setEqDraft(null);
+    }
+  };
+
+  const resetEq = () => {
+    setEqDraft(null);
+    void playerSetEq(0, [...EQ_ZERO]);
   };
 
   return (
@@ -244,6 +300,81 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             {formatDuration(Math.round(sleepRemaining * 1000))}
           </span>
         )}
+        <div className="eq-wrap">
+          <button
+            className={`icon-btn${eqDraft ? " repeat-on" : ""}`}
+            onClick={() => setEqOpen((o) => !o)}
+            disabled={!state}
+            title="Equalizer"
+            aria-label="Equalizer"
+            aria-expanded={eqOpen}
+            aria-pressed={eqDraft !== null}
+          >
+            <EqBarsIcon />
+          </button>
+          {eqOpen && state && (
+            <div className="eq-pop" role="group" aria-label="Equalizer panel">
+              <div className="eq-head">
+                <span>Equalizer</span>
+                <button className="eq-reset" onClick={resetEq}>
+                  Reset
+                </button>
+              </div>
+              <div className="eq-bands">
+                {EQ_LABELS.map((label, i) => (
+                  <label key={label} className="eq-band">
+                    <span className="eq-val">{fmtDb(shownGain(i))}</span>
+                    <input
+                      type="range"
+                      className="eq-slider"
+                      min={-12}
+                      max={12}
+                      step={0.5}
+                      value={shownGain(i)}
+                      aria-label={`EQ ${label} Hz`}
+                      onChange={(e) => setEqBand(i, Number(e.target.value))}
+                      onPointerUp={commitEq}
+                      onKeyUp={commitEq}
+                      onBlur={commitEq}
+                    />
+                    <span className="eq-freq">{label}</span>
+                  </label>
+                ))}
+              </div>
+              <label className="eq-preamp">
+                <span className="eq-val">{fmtDb(shownPreamp)}</span>
+                <input
+                  type="range"
+                  className="eq-slider eq-preamp-slider"
+                  min={-12}
+                  max={12}
+                  step={0.5}
+                  value={shownPreamp}
+                  aria-label="EQ preamp"
+                  onChange={(e) => setEqPreamp(Number(e.target.value))}
+                  onPointerUp={commitEq}
+                  onKeyUp={commitEq}
+                  onBlur={commitEq}
+                />
+                <span>Preamp</span>
+              </label>
+              <label className="rg-ctl">
+                <span>ReplayGain</span>
+                <select
+                  value={state.replaygain}
+                  aria-label="ReplayGain mode"
+                  onChange={(e) =>
+                    void playerSetReplayGain(e.target.value as ReplayGainMode)
+                  }
+                >
+                  <option value="off">Off</option>
+                  <option value="track">Track</option>
+                  <option value="album">Album</option>
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
         <button
           className="icon-btn"
           onClick={() => void playerToggleMute()}
