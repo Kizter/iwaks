@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
+import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -102,6 +102,11 @@ export function playerSetEq(preamp: number, gains: number[]): Promise<void> {
 
 export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {
   return invoke<void>("set_replaygain", { mode });
+}
+
+/** Lyrics for a track (embedded / `.lrc` sidecar), or `null` when absent. */
+export function getLyrics(path: string): Promise<Lyrics | null> {
+  return invoke<Lyrics | null>("get_lyrics", { path });
 }
 
 export function playerStop(): Promise<void> {

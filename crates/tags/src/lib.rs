@@ -2,6 +2,7 @@
 //! writing + backup lands with the tag editor in M4).
 
 pub mod cover;
+pub mod lyrics;
 pub mod read;
 pub mod write;
 

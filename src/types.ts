@@ -64,3 +64,15 @@ export interface PlayerState {
 
 /** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */
 export type ReplayGainMode = "off" | "track" | "album";
+
+/** Mirrors iwaks_tags::lyrics::TimedLine. */
+export interface LyricsLine {
+  time: number;
+  text: string;
+}
+
+/** Mirrors iwaks_tags::lyrics::Lyrics. */
+export interface Lyrics {
+  timed: LyricsLine[];
+  plain: string | null;
+}

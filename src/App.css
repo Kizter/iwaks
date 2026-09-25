@@ -805,6 +805,70 @@ input[type="range"].eq-slider::-moz-range-thumb {
   cursor: pointer;
 }
 
+/* ---- Lyrics popover ---- */
+
+.lyr-wrap {
+  position: relative;
+}
+
+.lyr-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: 340px;
+  max-height: min(55vh, 420px);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
+  display: flex;
+  flex-direction: column;
+}
+
+.lyr-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 0;
+}
+
+.lyr-line {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.lyr-line.on {
+  color: var(--text);
+  background: var(--mint);
+  font-weight: 600;
+}
+
+.lyr-empty {
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.lyr-plain {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-height: min(50vh, 380px);
+  overflow-y: auto;
+}
+
 .pb-time {
   display: flex;
   align-items: center;

@@ -8,4 +8,5 @@ description = "Audio tag reading/writing via lofty"
 [dependencies]
 iwaks-core.workspace = true
 lofty.workspace = true
+serde.workspace = true
 thiserror.workspace = true

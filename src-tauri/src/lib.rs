@@ -68,6 +68,15 @@ fn read_cover(path: String) -> Option<String> {
     ))
 }
 
+/// Lyrics for a track: `.lrc`/embedded LRC timed lines plus embedded plain
+/// text (USLT / Vorbis `LYRICS`). `null` when the file has none.
+#[tauri::command]
+fn get_lyrics(path: String) -> Option<iwaks_tags::lyrics::Lyrics> {
+    iwaks_tags::lyrics::read_lyrics(std::path::Path::new(&path))
+        .ok()
+        .flatten()
+}
+
 /// Kick off a background incremental scan of `path`. Emits `scan-started`,
 /// `scan-progress` (with `finished: false`), then a final `scan-progress`
 /// with `finished: true` or a `scan-error` event.
@@ -300,7 +309,8 @@ pub fn run() {
             set_eq,
             set_replaygain,
             stop_playback,
-            get_player_state
+            get_player_state,
+            get_lyrics
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

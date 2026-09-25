@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Cover } from "./Cover";
 import { formatDuration } from "./format";
 import {
+  getLyrics,
   playerNext,
   playerPrev,
   playerSeek,
@@ -14,7 +15,7 @@ import {
   playerToggleMute,
   playerTogglePlay,
 } from "./api";
-import type { PlayerState, ReplayGainMode, RepeatMode } from "./types";
+import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode } from "./types";
 
 const REPEAT_ORDER: RepeatMode[] = ["off", "all", "one"];
 const REPEAT_TITLE: Record<RepeatMode, string> = {
@@ -54,6 +55,17 @@ function EqBarsIcon() {
 function fmtDb(v: number): string {
   const s = Math.round(v * 10) / 10;
   return `${s > 0 ? "+" : ""}${s}`;
+}
+
+function LyricsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M2 3.4h12v1.6H2zM2 7.2h12v1.6H2zM2 11h8v1.6H2z"
+      />
+    </svg>
+  );
 }
 
 function PlayIcon() {
@@ -118,6 +130,8 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [sleepChoice, setSleepChoice] = useState("off");
   const [eqOpen, setEqOpen] = useState(false);
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(undefined);
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
   const playing = hasTrack && !state!.paused && !state!.stopped;
@@ -141,6 +155,49 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
       setSleepChoice("off");
     }
   }, [sleepRemaining, sleepChoice]);
+
+  // ---- lyrics: fetch for the current track while the panel is open ----
+  const lyricPath = cur?.path ?? null;
+  useEffect(() => {
+    if (!lyricsOpen || !lyricPath) {
+      setLyrics(undefined);
+      return;
+    }
+    let cancelled = false;
+    setLyrics(undefined); // loading
+    void getLyrics(lyricPath).then((l) => {
+      if (!cancelled) setLyrics(l);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lyricsOpen, lyricPath]);
+
+  // Active line = the last one whose timestamp is <= playback position.
+  const activeIdx = useMemo(() => {
+    const timed = lyrics?.timed ?? [];
+    if (timed.length === 0) return -1;
+    const t = state?.position ?? 0;
+    let idx = -1;
+    for (let i = 0; i < timed.length; i++) {
+      if (timed[i].time <= t) idx = i;
+      else break;
+    }
+    return idx;
+  }, [lyrics, state?.position]);
+
+  const lyricBox = useRef<HTMLDivElement | null>(null);
+  const activeLine = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const box = lyricBox.current;
+    const el = activeLine.current;
+    if (box && el) {
+      box.scrollTo({
+        top: Math.max(0, el.offsetTop - box.clientHeight / 2),
+        behavior: "smooth",
+      });
+    }
+  }, [activeIdx]);
 
   const commitSeek = () => {
     if (drag !== null) {
@@ -372,6 +429,41 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
                   <option value="album">Album</option>
                 </select>
               </label>
+            </div>
+          )}
+        </div>
+        <div className="lyr-wrap">
+          <button
+            className="icon-btn"
+            onClick={() => setLyricsOpen((o) => !o)}
+            disabled={!state}
+            title="Lyrics"
+            aria-label="Lyrics"
+            aria-expanded={lyricsOpen}
+          >
+            <LyricsIcon />
+          </button>
+          {lyricsOpen && state && (
+            <div className="lyr-pop" role="group" aria-label="Lyrics panel">
+              {lyrics === undefined ? (
+                <p className="lyr-empty">Loading…</p>
+              ) : lyrics === null || (lyrics.timed.length === 0 && !lyrics.plain) ? (
+                <p className="lyr-empty">No lyrics for this track</p>
+              ) : lyrics.timed.length > 0 ? (
+                <div className="lyr-list" ref={lyricBox}>
+                  {lyrics.timed.map((line, i) => (
+                    <div
+                      key={i}
+                      ref={i === activeIdx ? activeLine : undefined}
+                      className={`lyr-line${i === activeIdx ? " on" : ""}`}
+                    >
+                      {line.text}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <pre className="lyr-plain">{lyrics.plain}</pre>
+              )}
             </div>
           )}
         </div>
