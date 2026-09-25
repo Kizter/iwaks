@@ -86,6 +86,15 @@ export function playerSetRepeat(repeat: RepeatMode): Promise<void> {
   return invoke<void>("set_repeat", { repeat });
 }
 
+export function playerSetSpeed(speed: number): Promise<void> {
+  return invoke<void>("set_speed", { speed });
+}
+
+/** Arm the sleep timer (`null` cancels); playback pauses at the deadline. */
+export function playerSetSleepTimer(seconds: number | null): Promise<void> {
+  return invoke<void>("set_sleep_timer", { seconds });
+}
+
 export function playerStop(): Promise<void> {
   return invoke<void>("stop_playback");
 }

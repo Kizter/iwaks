@@ -188,6 +188,23 @@ fn toggle_mute(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_speed(speed: f64, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_speed(speed);
+    Ok(())
+}
+
+/// Arm the sleep timer (`seconds` seconds) or cancel it with `null`.
+#[tauri::command]
+fn set_sleep_timer(seconds: Option<f64>, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_sleep_timer(seconds);
+    Ok(())
+}
+
+#[tauri::command]
 fn set_repeat(repeat: RepeatMode, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
@@ -261,6 +278,8 @@ pub fn run() {
             set_volume,
             toggle_mute,
             set_repeat,
+            set_speed,
+            set_sleep_timer,
             stop_playback,
             get_player_state
         ])

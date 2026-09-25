@@ -636,6 +636,43 @@ body {
   line-height: 1;
 }
 
+.icon-btn.speed-btn {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.sleep-ctl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+}
+
+.sleep-ctl select {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.sleep-ctl select:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sleep-count {
+  font-size: 0.72rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .pb-time {
   display: flex;
   align-items: center;

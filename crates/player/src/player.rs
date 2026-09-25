@@ -30,7 +30,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use iwaks_core::track::Track;
 use serde::Serialize;
@@ -78,6 +78,10 @@ pub struct PlayerState {
     pub volume: i64,
     pub mute: bool,
     pub repeat: RepeatMode,
+    /// Playback-rate multiplier (mpv `speed` property); clamped to 0.25–4.0.
+    pub speed: f64,
+    /// Seconds left on the sleep timer; `None` when no timer is armed.
+    pub sleep_remaining: Option<f64>,
 }
 
 /// Receives a fresh [`PlayerState`] after every change and each pump tick.
@@ -93,7 +97,9 @@ enum Cmd {
     SeekRelative(f64),
     SetVolume(i64),
     ToggleMute,
+    SetSpeed(f64),
     Stop,
+    SleepElapsed,
     Refresh,
 }
 
@@ -109,6 +115,8 @@ pub struct Player {
     queue: Mutex<Queue>,
     sink: Mutex<Option<StateSink>>,
     commands: Mutex<VecDeque<Cmd>>,
+    /// When set, the pump pauses playback once `Instant::now()` passes it.
+    sleep_deadline: Mutex<Option<Instant>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     stopped: AtomicBool,
     shut_down: AtomicBool,
@@ -132,11 +140,14 @@ impl Player {
                 volume: 80,
                 mute: false,
                 repeat: RepeatMode::Off,
+                speed: 1.0,
+                sleep_remaining: None,
             }),
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
             sink: Mutex::new(Some(sink)),
             commands: Mutex::new(VecDeque::new()),
+            sleep_deadline: Mutex::new(None),
             thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
             shut_down: AtomicBool::new(false),
@@ -246,6 +257,22 @@ impl Player {
 
     pub fn toggle_mute(&self) {
         self.push(Cmd::ToggleMute);
+    }
+
+    /// Playback-rate multiplier; values outside 0.25–4.0 are clamped
+    /// (mirrors how `set_volume` clamps, and matches mpv's own limits).
+    pub fn set_speed(&self, speed: f64) {
+        self.push(Cmd::SetSpeed(speed.clamp(0.25, 4.0)));
+    }
+
+    /// Arm the sleep timer: playback pauses once `seconds` have elapsed.
+    /// `None` (or a non-positive value) cancels an armed timer.
+    pub fn set_sleep_timer(&self, seconds: Option<f64>) {
+        let deadline = seconds
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .map(|s| Instant::now() + Duration::from_secs_f64(s));
+        *self.sleep_deadline.lock().unwrap() = deadline;
+        self.push(Cmd::Refresh);
     }
 
     pub fn set_repeat(&self, repeat: RepeatMode) {
@@ -362,9 +389,21 @@ impl Player {
                 let _ = api.command(&["set", "mute", if muted { "no" } else { "yes" }]);
                 self.emit();
             }
+            Cmd::SetSpeed(speed) => {
+                let api = self.api();
+                let _ = api.command(&["set", "speed", &speed.to_string()]);
+                self.emit();
+            }
             Cmd::Stop => {
                 self.stopped.store(true, Ordering::SeqCst);
                 let _ = self.api().command(&["stop"]);
+                self.emit();
+            }
+            Cmd::SleepElapsed => {
+                // Pause only — the queue stays loaded so the user resumes
+                // with one press. Mirrors the pause branch of TogglePlay.
+                let api = self.api();
+                let _ = api.command(&["set", "pause", "yes"]);
                 self.emit();
             }
             Cmd::Refresh => self.emit(),
@@ -390,6 +429,22 @@ impl Player {
         loop {
             if player.cancelled.load(Ordering::SeqCst) {
                 break;
+            }
+            // Sleep timer: once the deadline passes, clear it and queue the
+            // pause. `Cmd::SleepElapsed` runs in the drain below, so the
+            // pause lands within the same loop iteration (≤100 ms late).
+            let sleep_fired = {
+                let mut deadline = player.sleep_deadline.lock().unwrap();
+                match *deadline {
+                    Some(until) if Instant::now() >= until => {
+                        *deadline = None;
+                        true
+                    }
+                    _ => false,
+                }
+            };
+            if sleep_fired {
+                player.commands.lock().unwrap().push_back(Cmd::SleepElapsed);
             }
             // Drain commands (lock released before running, so `push` never
             // waits on a command that is executing). A queued command waits
@@ -488,6 +543,12 @@ impl Player {
         let paused = api.get_flag("pause").unwrap_or(true);
         let volume = api.get_i64("volume").unwrap_or(80).clamp(0, 100);
         let mute = api.get_flag("mute").unwrap_or(false);
+        let speed = api.get_double("speed").unwrap_or(1.0);
+        let sleep_remaining = self
+            .sleep_deadline
+            .lock()
+            .unwrap()
+            .map(|until| (until - Instant::now()).as_secs_f64().max(0.0));
         let (queue, tracks) = {
             // Same order as `play_index` (queue → tracks) to avoid ABBA.
             let q = self.queue.lock().unwrap();
@@ -506,6 +567,8 @@ impl Player {
             volume,
             mute,
             repeat: queue.repeat,
+            speed,
+            sleep_remaining,
         }
     }
 }
@@ -714,6 +777,96 @@ mod tests {
         })
         .expect("skips the corrupt file and plays the next");
         assert_eq!(s.index, Some(1));
+        player.shutdown();
+    }
+
+    #[test]
+    fn speed_property_roundtrip_and_clamp() {
+        if !have_libmpv() {
+            return;
+        }
+        let a = test_dir("speed").join("a.wav");
+        write_wav(&a, 2.0);
+        let tracks = vec![track(a.to_str().unwrap(), "A", 2.0)];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("starts playing");
+        assert_eq!(player.snapshot().speed, 1.0, "default speed");
+
+        player.set_speed(1.5);
+        wait_for(&player, Duration::from_secs(2), |s| s.speed == 1.5)
+            .expect("speed property applied");
+        assert_eq!(player.snapshot().speed, 1.5);
+
+        // Out-of-range values are clamped, mirroring set_volume.
+        player.set_speed(-3.0);
+        wait_for(&player, Duration::from_secs(2), |s| s.speed == 0.25)
+            .expect("clamped to the floor");
+        player.set_speed(99.0);
+        wait_for(&player, Duration::from_secs(2), |s| s.speed == 4.0)
+            .expect("clamped to the ceiling");
+        player.shutdown();
+    }
+
+    #[test]
+    fn sleep_timer_pauses_playback() {
+        if !have_libmpv() {
+            return;
+        }
+        let a = test_dir("sleep").join("a.wav");
+        write_wav(&a, 2.0);
+        let tracks = vec![track(a.to_str().unwrap(), "A", 2.0)];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("starts playing");
+
+        player.set_sleep_timer(Some(0.3));
+        let s = wait_for(&player, Duration::from_secs(3), |s| {
+            s.paused && !s.stopped && s.current.is_some()
+        })
+        .expect("sleep timer pauses playback");
+        assert_eq!(s.sleep_remaining, None, "timer consumed when it fires");
+        player.shutdown();
+    }
+
+    #[test]
+    fn sleep_timer_cancelled_keeps_playing() {
+        if !have_libmpv() {
+            return;
+        }
+        let a = test_dir("sleep-cancel").join("a.wav");
+        write_wav(&a, 2.0);
+        let tracks = vec![track(a.to_str().unwrap(), "A", 2.0)];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("starts playing");
+
+        player.set_sleep_timer(Some(0.3));
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.sleep_remaining.is_some()
+        })
+        .expect("timer armed");
+        player.set_sleep_timer(None);
+        wait_for(&player, Duration::from_secs(2), |s| {
+            s.sleep_remaining.is_none()
+        })
+        .expect("timer cancelled");
+
+        // Wait past the original deadline: playback must keep going.
+        std::thread::sleep(Duration::from_millis(600));
+        assert!(!player.snapshot().paused, "cancelled timer must not pause");
         player.shutdown();
     }
 }

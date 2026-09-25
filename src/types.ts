@@ -50,4 +50,8 @@ export interface PlayerState {
   volume: number;
   mute: boolean;
   repeat: RepeatMode;
+  /** Playback-rate multiplier (0.25–4.0). */
+  speed: number;
+  /** Seconds left on the sleep timer, or `null` when none is armed. */
+  sleepRemaining: number | null;
 }

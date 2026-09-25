@@ -9,7 +9,7 @@ Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WA
 - ✅ **M0** — Scaffold, CI, benchmark baseline, branding
 - ✅ **M1** — Library core, SQLite scanner, FTS5 search, library UI
 - ✅ **M2** — Playback (libmpv), player bar *(current)*
-- ⏳ **M3** — EQ, ReplayGain, sleep timer, playback speed, visualizer, lyrics
+- ⏳ **M3** — speed + sleep timer ✅; EQ, ReplayGain, visualizer, lyrics *(current)*
 - ⏳ **M4** — Playlists, queue, folder browse, tag editor
 - ⏳ **M5** — Casting (DLNA → Chromecast), installer, release
 

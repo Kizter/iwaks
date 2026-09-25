@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Cover } from "./Cover";
 import { formatDuration } from "./format";
 import {
@@ -6,6 +6,8 @@ import {
   playerPrev,
   playerSeek,
   playerSetRepeat,
+  playerSetSleepTimer,
+  playerSetSpeed,
   playerSetVolume,
   playerToggleMute,
   playerTogglePlay,
@@ -18,6 +20,18 @@ const REPEAT_TITLE: Record<RepeatMode, string> = {
   all: "Repeat: all",
   one: "Repeat: one",
 };
+
+/** Speed cycle offered by the player-bar button, in the same order. */
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/** Sleep timer choices in seconds; the select maps "off" to `null`. */
+const SLEEP_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "off", label: "Off" },
+  { value: "900", label: "15 min" },
+  { value: "1800", label: "30 min" },
+  { value: "3600", label: "60 min" },
+  { value: "5400", label: "90 min" },
+];
 
 function PlayIcon() {
   return (
@@ -78,6 +92,7 @@ function RepeatIcon({ mode }: { mode: RepeatMode }) {
 /** Always-visible bottom bar: now-playing, transport, seek, repeat, volume. */
 export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [drag, setDrag] = useState<number | null>(null);
+  const [sleepChoice, setSleepChoice] = useState("off");
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
   const playing = hasTrack && !state!.paused && !state!.stopped;
@@ -87,6 +102,16 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const volume = state?.volume ?? 0;
   const repeat = state?.repeat ?? "off";
   const mute = state?.mute ?? false;
+  const speed = state?.speed ?? 1;
+  const sleepRemaining = state?.sleepRemaining ?? null;
+
+  // When the timer runs out or is cleared from elsewhere, the select snaps
+  // back to "Off" instead of showing a stale countdown value.
+  useEffect(() => {
+    if (sleepRemaining === null && sleepChoice !== "off") {
+      setSleepChoice("off");
+    }
+  }, [sleepRemaining, sleepChoice]);
 
   const commitSeek = () => {
     if (drag !== null) {
@@ -99,6 +124,12 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
     if (!state) return;
     const i = Math.max(0, REPEAT_ORDER.indexOf(state.repeat));
     void playerSetRepeat(REPEAT_ORDER[(i + 1) % REPEAT_ORDER.length]);
+  };
+
+  const cycleSpeed = () => {
+    if (!state) return;
+    const i = Math.max(0, SPEEDS.indexOf(state.speed));
+    void playerSetSpeed(SPEEDS[(i + 1) % SPEEDS.length]);
   };
 
   return (
@@ -180,6 +211,39 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
         >
           <RepeatIcon mode={repeat} />
         </button>
+        <button
+          className="icon-btn speed-btn"
+          onClick={cycleSpeed}
+          disabled={!state}
+          title={`Speed: ${speed}×`}
+          aria-label="Playback speed"
+        >
+          {String(speed)}×
+        </button>
+        <label className="sleep-ctl">
+          <span className="sleep-label">Sleep</span>
+          <select
+            value={sleepChoice}
+            disabled={!state}
+            aria-label="Sleep timer"
+            onChange={(e) => {
+              const value = e.target.value;
+              setSleepChoice(value);
+              void playerSetSleepTimer(value === "off" ? null : Number(value));
+            }}
+          >
+            {SLEEP_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {sleepRemaining !== null && sleepRemaining > 0 && (
+          <span className="sleep-count" aria-label="Sleep timer remaining">
+            {formatDuration(Math.round(sleepRemaining * 1000))}
+          </span>
+        )}
         <button
           className="icon-btn"
           onClick={() => void playerToggleMute()}
