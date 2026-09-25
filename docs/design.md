@@ -25,7 +25,7 @@
 | A4 | Bahasa UI: Inggris (netral untuk berbagi GitHub); nama app "Iwaks" (final) |
 | A5 | Lisensi GitHub: MIT |
 | A6 | Reliability: file corrupt/format aneh → skip + warning, tidak pernah crash |
-| A7 | libmpv di-bundle sebagai `mpv-1.dll` untuk Windows (supplied binary) |
+| A7 | libmpv di-bundle sebagai `libmpv-2.dll` untuk Windows (supplied binary) |
 | A8 | Urutan casting v1: **DLNA dulu → Chromecast menyusul** dalam siklus v1; Bluetooth post-v1 |
 
 ## 3. Decision Log
@@ -103,6 +103,7 @@ playlist_tracks(playlist_id, track_id, position)
 ```
 - FTS5 untuk pencarian; scanner **inkremental** (hanya file dengan `modified_at` berubah).
 - **Amendemen M1:** M1 mengimplementasikan `tracks` + `tracks_fts` (external-content + trigger); tabel `albums`/`artists`/`playlists` menyusul di M4 (UI browse) — migrasi per versi `user_version`. Format diambil dari ekstensi file; cover art thumbnail ditampilkan on-demand (`read_cover` → data URL, cache sesi frontend), cache disk `cover_path` menyusul di M3/M4. Scan folder kedua **menumpuk** (multi-root); pemangkasan hanya untuk file yang benar-benar hilang dari disk (`clean_missing` = cek `exists`), bukan "di luar root terakhir". Scanner salah-baca file (corrupt) → dihitung `errors`, tidak crash, di-*retry* tiap scan (A6).
+- **Amendemen M2:** Playback diimplementasikan di crate `crates/player` (menggantikan rencana `audio`): `ffi.rs` = binding libmpv 10 simbol (`Mpv` Send+Sync, tanpa lock internal). **Pump satu thread OWNS seluruh lifecycle libmpv** (create → options → init → `wait_event` → commands); tidak ada thread lain yang menyentuh handle — `mpv_wakeup` pun tidak dipakai, karena cross-thread call yang balapan dengan command sinkron dapat deadlock pada libmpv 0.41. Semua perintah publik (`play_tracks`, `toggle_play`, `seek`, `next/prev`, volume, mute) hanya push `Cmd` ke `Mutex<VecDeque>`; pump mengeksekusi di iterasi berikutnya (≤100 ms, tanpa wakeup). `on_end_file` **tidak pernah menyentuh libmpv** (read properti saat transisi EndFile→idle dapat self-deadlock core): arm Eof/Error/Redirect hanya mengantre `Cmd::Load` via `advance_to`; arm Stop (manual) hanya update state. Watchdog: di pump, semua lock queue **di-ikat ke `let` dulu** sebelum memanggil `play_index` — guard sementara pada scrutinee `match`/`if let` hidup selama ekspresi penuh → `play_index` yang mengunci ulang queue akan self-deadlock (bug nyata di `next/prev` yang ditemukan & diperbaiki di M2). Headless test: `ao=null` timed + `gapless=yes`; `playback-time` hanya observable pada file **≥ 1 dtk** (file lebih pendek ter-buffer penuh ke AO sehingga posisi pin di nilai awal — roundtrip memakai track 2 dtk). DLL via `scripts/fetch-libmpv.ps1` → `src-tauri/libmpv/libmpv-2.dll`; headless test di CI memakai DLL nyata dengan env `IWAKS_LIBMPV`.
 - Folder browse: view langsung struktur folder, baca tag on-the-fly + cache tipis.
 - Tag editor: FLAC (Vorbis), MP3 (ID3v2), M4A, OGG, WavPack, AIFF, DSF/DFF; backup `.bak` sebelum tulis; via `lofty`.
 - Playlist: internal SQLite + impor/ekspor `.m3u`; queue sesi (drag-reorder, save-as-playlist).
@@ -133,7 +134,8 @@ playlist_tracks(playlist_id, track_id, position)
 - `core`: unit test pure (queue, replaygain, filter).
 - `library`: scanner atas fixture folder, migrasi DB.
 - `tags`: round-trip baca/tulis di copy fixture (bukan file asli).
-- `audio`/`cast`: trait + mock di CI.
+- `player`: unit + integrasi headless dengan **libmpv DLL nyata** (`ao=null` timed, `IWAKS_LIBMPV` → jala penuh pompa, auto-skip korup, roundtrip play/pause/seek/volume/next/wrap).
+- `cast`: trait + mock di CI.
 - Frontend: vitest + testing-library (queue reorder, filter).
 - Manual: WASAPI exclusive di perangkat asli, cast ke renderer sungguhan.
 
@@ -143,7 +145,7 @@ playlist_tracks(playlist_id, track_id, position)
 |---|---|---|
 | M0 | Scaffold Tauri + workspace + CI + benchmark baseline | Repo jalan, `npm run tauri dev` |
 | M1 | `core` + `library` + scanner | Lagu muncul, list + search |
-| M2 | `audio` libmpv | Play/pause/seek/volume/gapless + player bar |
+| M2 | `player` libmpv (pump single-thread) + player bar | Play/pause/seek/volume/next/prev + bar |
 | M3 | EQ, ReplayGain, sleep timer, speed, visualizer, lirik | Serangkaian fitur audio selesai |
 | M4 | Playlist + queue + folder browse + tag editor | Manajemen library lengkap |
 | M5 | Casting DLNA → Chromecast + NSIS installer + README GitHub | Rilis v1 |

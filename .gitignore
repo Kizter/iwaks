@@ -25,3 +25,6 @@ dist-ssr
 
 # Cargo workspace
 target/
+
+# Downloaded libmpv binary (fetched by scripts/fetch-libmpv.ps1)
+src-tauri/libmpv/

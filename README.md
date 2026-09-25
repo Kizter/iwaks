@@ -7,8 +7,8 @@ Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WA
 ## Features (roadmap)
 
 - ✅ **M0** — Scaffold, CI, benchmark baseline, branding
-- ✅ **M1** — Library core, SQLite scanner, FTS5 search, library UI *(current)*
-- ⏳ **M2** — Playback (libmpv), player bar
+- ✅ **M1** — Library core, SQLite scanner, FTS5 search, library UI
+- ✅ **M2** — Playback (libmpv), player bar *(current)*
 - ⏳ **M3** — EQ, ReplayGain, sleep timer, playback speed, visualizer, lyrics
 - ⏳ **M4** — Playlists, queue, folder browse, tag editor
 - ⏳ **M5** — Casting (DLNA → Chromecast), installer, release
@@ -23,6 +23,7 @@ Full design: [`docs/design.md`](docs/design.md)
 - [VS 2022 Build Tools](https://visualstudio.microsoft.com/downloads/) — workload "Desktop development with C++"
 - Node.js ≥ 22
 - WebView2 runtime (bawaan Windows 11)
+- libmpv DLL — fetch once via `powershell -ExecutionPolicy Bypass -File scripts/fetch-libmpv.ps1` (downloads `src-tauri/libmpv/libmpv-2.dll`)
 
 ## Development
 

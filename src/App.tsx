@@ -1,58 +1,23 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { getTracks, listenScan, pickFolder, readCover, scanFolder, searchTracks } from "./api";
+import {
+  getPlayerState,
+  getTracks,
+  listenPlayer,
+  listenScan,
+  pickFolder,
+  playTracks,
+  playerTogglePlay,
+  scanFolder,
+  searchTracks,
+} from "./api";
 import "./App.css";
 import { formatBadge, formatDuration, scanSummary } from "./format";
-import type { ScanProgress, Track } from "./types";
+import { Cover } from "./Cover";
+import PlayerBar from "./PlayerBar";
+import type { PlayerState, ScanProgress, Track } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
 
 const ROW_HEIGHT = 56;
-
-/** Embedded artwork per track path, cached for the session (null = has none). */
-const coverCache = new Map<string, string | null>();
-
-/** Music-note fallback shown when a track has no embedded cover art. */
-function NoteIcon() {
-  return (
-    <svg className="cover-note" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M7.5 2v9.2A2.1 2.1 0 1 0 9.1 13.1V3.1l4.4-1.03v7.5a2.1 2.1 0 1 0 1.6 2.06V1.3L7.5 2z"
-      />
-    </svg>
-  );
-}
-
-/** Track thumbnail: embedded art when present, else a colored note tile. */
-function Cover({ track }: { track: Track }) {
-  const [src, setSrc] = useState<string | null | undefined>(undefined); // undefined = loading
-  const fmt = track.format.toLowerCase();
-
-  useEffect(() => {
-    let alive = true;
-    if (coverCache.has(track.path)) {
-      setSrc(coverCache.get(track.path) ?? null);
-      return;
-    }
-    readCover(track.path)
-      .then((u) => {
-        coverCache.set(track.path, u);
-        if (alive) setSrc(u);
-      })
-      .catch(() => {
-        coverCache.set(track.path, null);
-        if (alive) setSrc(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [track.path]);
-
-  return (
-    <span className={`cover cover-${fmt}`} aria-hidden="true">
-      {src ? <img className="cover-art" src={src} alt="" loading="lazy" /> : <NoteIcon />}
-    </span>
-  );
-}
 
 /** Debounced search-as-you-type hook. Blank query → full library. */
 function useSearch(query: string) {
@@ -73,14 +38,33 @@ function useSearch(query: string) {
   return tracks;
 }
 
-function TrackRow({ track, top }: { track: Track; top: number }) {
+function TrackRow({
+  track,
+  top,
+  isPlaying,
+  onPlay,
+}: {
+  track: Track;
+  top: number;
+  isPlaying: boolean;
+  onPlay: () => void;
+}) {
   const artist = track.artist ?? "Unknown artist";
   const album = track.album ?? "";
   return (
     <li
-      className="track-row"
+      className={`track-row${isPlaying ? " is-playing" : ""}`}
       style={{ transform: `translateY(${top}px)` }}
       title={track.path}
+      onClick={onPlay}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onPlay();
+        }
+      }}
+      tabIndex={0}
+      role="button"
     >
       <Cover track={track} />
       <span className="track-main">
@@ -99,7 +83,15 @@ function TrackRow({ track, top }: { track: Track; top: number }) {
 }
 
 /** Fixed-row-height virtualized list (hand-rolled — no dependency, React-19-safe). */
-function TrackList({ tracks }: { tracks: Track[] }) {
+function TrackList({
+  tracks,
+  playingPath,
+  onPlay,
+}: {
+  tracks: Track[];
+  playingPath: string | null;
+  onPlay: (index: number) => void;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH] = useState(0);
@@ -122,7 +114,15 @@ function TrackList({ tracks }: { tracks: Track[] }) {
   const rows: ReactNode[] = [];
   for (let i = start; i < end; i++) {
     const t = tracks[i];
-    rows.push(<TrackRow key={t.id === 0 ? t.path : t.id} track={t} top={i * ROW_HEIGHT} />);
+    rows.push(
+      <TrackRow
+        key={t.id === 0 ? t.path : t.id}
+        track={t}
+        top={i * ROW_HEIGHT}
+        isPlaying={t.path === playingPath}
+        onPlay={() => onPlay(i)}
+      />,
+    );
   }
 
   return (
@@ -144,7 +144,7 @@ function Skeleton({ count }: { count: number }) {
   );
 }
 
-function Shell({ children }: { children: ReactNode }) {
+function Shell({ children, playerState }: { children: ReactNode; playerState: PlayerState | null }) {
   return (
     <main className="app">
       <aside className="sidebar">
@@ -173,6 +173,7 @@ function Shell({ children }: { children: ReactNode }) {
       <section className="main" id="songs">
         {children}
       </section>
+      <PlayerBar state={playerState} />
     </main>
   );
 }
@@ -185,6 +186,8 @@ function App() {
   const [scanProg, setScanProg] = useState<ScanProgress | null>(null);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [playerState, setPlayerState] = useState<PlayerState | null>(null);
+  const [playerError, setPlayerError] = useState<string | null>(null);
   const tracks = useSearch(query);
 
   useEffect(() => {
@@ -212,6 +215,59 @@ function App() {
       disposed = true;
       unlisten?.();
     };
+  }, []);
+
+  // Playback: initial state + live updates / init errors.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    getPlayerState()
+      .then((s) => {
+        if (!disposed) setPlayerState(s);
+      })
+      .catch(() => {});
+    listenPlayer(
+      (s) => {
+        if (disposed) return;
+        setPlayerState(s);
+        setPlayerError(null);
+      },
+      (msg) => {
+        if (disposed) return;
+        setPlayerError(msg);
+      },
+    ).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Space toggles play/pause (never while typing or when a button is focused).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      const tag = el.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "BUTTON" ||
+        el.isContentEditable ||
+        el.closest("[role='button']")
+      ) {
+        return;
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        void playerTogglePlay();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   // Track-level load states: the search hook owns data; a failed load shows a banner.
@@ -254,8 +310,16 @@ function App() {
       ? Math.min(100, Math.round((scanProg.scanned / scanProg.totalFiles) * 100))
       : 0;
 
+  const onPlay = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= showing.length) return;
+      void playTracks(showing, index);
+    },
+    [showing],
+  );
+
   return (
-    <Shell>
+    <Shell playerState={playerState}>
       <div className="toolbar">
         <div className="toolbar-title">
           <h1>Songs</h1>
@@ -299,6 +363,14 @@ function App() {
           {query.trim() !== "" && " · showing results for “" + query.trim() + "”"}
         </p>
       )}
+      {playerError && (
+        <div className="banner" role="alert">
+          <span>{playerError}</span>
+          <button className="btn-ghost" onClick={() => setPlayerError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {banner && (
         <div className="banner" role="alert">
           <span>{banner}</span>
@@ -338,7 +410,11 @@ function App() {
             </button>
           </div>
         ) : (
-          <TrackList tracks={showing} />
+          <TrackList
+            tracks={showing}
+            playingPath={playerState?.current?.path ?? null}
+            onPlay={onPlay}
+          />
         )}
       </div>
     </Shell>

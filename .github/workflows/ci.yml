@@ -34,5 +34,12 @@ jobs:
       - name: cargo clippy (workspace)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Fetch libmpv (headless player tests)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-libmpv.ps1
+
       - name: cargo test (workspace)
+        env:
+          IWAKS_LIBMPV: ${{ github.workspace }}\src-tauri\libmpv\libmpv-2.dll
+          RUST_TEST_THREADS: "1"
         run: cargo test --workspace

@@ -34,3 +34,20 @@ export interface ScanEvent {
   progress: ScanProgress;
   finished: boolean;
 }
+
+/** Matches iwaks_player::queue::RepeatMode (serde lowercase). */
+export type RepeatMode = "off" | "all" | "one";
+
+/** Mirrors iwaks_player::PlayerState (serde camelCase). */
+export interface PlayerState {
+  current: Track | null;
+  index: number | null;
+  listLen: number;
+  position: number;
+  duration: number;
+  paused: boolean;
+  stopped: boolean;
+  volume: number;
+  mute: boolean;
+  repeat: RepeatMode;
+}

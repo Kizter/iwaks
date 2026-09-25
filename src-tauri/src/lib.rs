@@ -1,18 +1,21 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use iwaks_core::track::Track;
 use iwaks_library::db::Library;
 use iwaks_library::scan::{scan, ScanOptions, ScanProgress};
+use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Shared application state. `Library` connections are opened per call,
-/// so this stays `Send + Sync`.
+/// so this stays `Send + Sync`. The player is `None` when libmpv failed to
+/// initialize (e.g. the DLL is missing) — the app still runs, without audio.
 pub struct AppState {
     db_path: PathBuf,
     scanning: Arc<AtomicBool>,
+    player: Arc<Mutex<Option<Arc<Player>>>>,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -22,8 +25,16 @@ struct ScanEvent {
     finished: bool,
 }
 
+const PLAYER_UNAVAILABLE: &str =
+    "Playback is unavailable — libmpv DLL missing or failed to initialize";
+
 fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
+}
+
+/// Clone of the live player handle, or `None` when playback is unavailable.
+fn player(state: &AppState) -> Option<Arc<Player>> {
+    state.player.lock().unwrap().clone()
 }
 
 /// All library tracks, sorted artist → album → title.
@@ -109,6 +120,95 @@ fn scan_folder(app: AppHandle, path: String, state: State<'_, AppState>) -> Resu
     Ok(())
 }
 
+// ---------- playback (libmpv via iwaks-player) ----------
+
+/// Play `tracks` starting at `index`; the queue is rebuilt from this list.
+#[tauri::command]
+fn play_tracks(tracks: Vec<Track>, index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .play_tracks(tracks, index);
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_play(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .toggle_play();
+    Ok(())
+}
+
+#[tauri::command]
+fn next_track(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .next();
+    Ok(())
+}
+
+#[tauri::command]
+fn prev_track(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .prev();
+    Ok(())
+}
+
+#[tauri::command]
+fn seek(position: f64, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .seek(position);
+    Ok(())
+}
+
+#[tauri::command]
+fn seek_relative(delta: f64, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .seek_relative(delta);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_volume(volume: i64, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_volume(volume);
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_mute(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .toggle_mute();
+    Ok(())
+}
+
+#[tauri::command]
+fn set_repeat(repeat: RepeatMode, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_repeat(repeat);
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_playback(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .stop();
+    Ok(())
+}
+
+/// Initial `player-state`: `null` when playback is unavailable.
+#[tauri::command]
+fn get_player_state(state: State<'_, AppState>) -> Option<PlayerState> {
+    player(&state).map(|p| p.snapshot())
+}
+
 struct ScanGuard(Arc<AtomicBool>);
 impl Drop for ScanGuard {
     fn drop(&mut self) {
@@ -118,15 +218,32 @@ impl Drop for ScanGuard {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("iwaks.db");
+
+            let handle = app.handle().clone();
+            let player = match Player::start(
+                &PlayerOptions::default(),
+                Box::new(move |s: &PlayerState| {
+                    let _ = handle.emit("player-state", s.clone());
+                }),
+            ) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("player unavailable: {e}");
+                    let _ = app.emit("player-error", e);
+                    None
+                }
+            };
+
             app.manage(AppState {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
+                player: Arc::new(Mutex::new(player)),
             });
             Ok(())
         })
@@ -134,8 +251,30 @@ pub fn run() {
             get_tracks,
             search_tracks,
             scan_folder,
-            read_cover
+            read_cover,
+            play_tracks,
+            toggle_play,
+            next_track,
+            prev_track,
+            seek,
+            seek_relative,
+            set_volume,
+            toggle_mute,
+            set_repeat,
+            stop_playback,
+            get_player_state
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Stop libmpv cleanly when the app closes (pump thread join + destroy).
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                if let Some(p) = state.player.lock().unwrap().take() {
+                    p.shutdown();
+                }
+            }
+        }
+    });
 }
