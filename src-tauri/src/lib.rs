@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use iwaks_core::track::Track;
 use iwaks_library::db::Library;
+use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
 use serde::Serialize;
@@ -336,6 +337,95 @@ fn toggle_mini_visualizer(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---------- playlists (M4 slice 1) ----------
+
+#[tauri::command]
+fn list_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
+    open_lib(&state)?
+        .list_playlists()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_playlist(name: String, state: State<'_, AppState>) -> Result<i64, String> {
+    open_lib(&state)?
+        .create_playlist(&name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_playlist(id: i64, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .rename_playlist(id, &name)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_playlist(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .delete_playlist(id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_playlist_tracks(id: i64, state: State<'_, AppState>) -> Result<Option<Vec<Track>>, String> {
+    open_lib(&state)?
+        .get_playlist_tracks(id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_to_playlist(
+    playlist_id: i64,
+    track_id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    open_lib(&state)?
+        .add_track_to_playlist(playlist_id, track_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_from_playlist(
+    playlist_id: i64,
+    track_id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    open_lib(&state)?
+        .remove_track_from_playlist(playlist_id, track_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reorder_playlist(
+    playlist_id: i64,
+    track_ids: Vec<i64>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    open_lib(&state)?
+        .reorder_playlist(playlist_id, &track_ids)
+        .map_err(|e| e.to_string())
+}
+
+/// Import an `.m3u` file as a new playlist; returns its id.
+#[tauri::command]
+fn import_m3u(path: String, state: State<'_, AppState>) -> Result<i64, String> {
+    open_lib(&state)?
+        .import_m3u(std::path::Path::new(&path))
+        .map_err(|e| e.to_string())
+}
+
+/// Export a playlist to an `.m3u` file at `path`.
+#[tauri::command]
+fn export_m3u(playlist_id: i64, path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let lib = open_lib(&state)?;
+    let content = lib
+        .export_m3u(playlist_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "playlist not found".to_string())?;
+    std::fs::write(std::path::Path::new(&path), content).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -413,7 +503,17 @@ pub fn run() {
             stop_playback,
             get_player_state,
             get_lyrics,
-            toggle_mini_visualizer
+            toggle_mini_visualizer,
+            list_playlists,
+            create_playlist,
+            rename_playlist,
+            delete_playlist,
+            get_playlist_tracks,
+            add_to_playlist,
+            remove_from_playlist,
+            reorder_playlist,
+            import_m3u,
+            export_m3u
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

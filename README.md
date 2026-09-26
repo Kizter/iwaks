@@ -11,7 +11,7 @@ Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WA
 - ✅ **M2** — Playback (libmpv), player bar
 - ✅ **M3** — speed + sleep timer, EQ + ReplayGain, lyrics, generative visualizer
 - ✅ **Post-M3** — shared-WASAPI audio fix, add files / scan folder, shuffle + reshuffle, Albums / Artists / Folders browse, mini visualizer window on minimize
-- ⏳ **M4** — Playlists, queue, folder browse, tag editor
+- 🚧 **M4** — Playlists ✅ (slice 1: CRUD + `.m3u` import/export, add/remove songs), queue, folder browse, tag editor
 - ⏳ **M5** — Casting (DLNA → Chromecast), installer, release
 
 Format support (target): FLAC, WAV, ALAC, MP3, AAC, OGG, Opus, WavPack, AIFF, WMA Lossless, DSD (DSF/DFF).

@@ -1,14 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   addFiles,
+  addToPlaylist,
+  createPlaylist,
+  deletePlaylist,
+  exportM3u,
   getPlayerState,
+  getPlaylistTracks,
   getTracks,
+  importM3u,
   listenPlayer,
   listenScan,
+  listPlaylists,
   pickFiles,
   pickFolder,
+  pickM3uFile,
+  pickM3uSave,
   playTracks,
   playerTogglePlay,
+  removeFromPlaylist,
+  renamePlaylist,
   scanFolder,
   searchTracks,
 } from "./api";
@@ -16,7 +27,7 @@ import "./App.css";
 import { formatBadge, formatDuration, scanSummary } from "./format";
 import { Cover } from "./Cover";
 import PlayerBar from "./PlayerBar";
-import type { PlayerState, ScanProgress, Track } from "./types";
+import type { Playlist, PlayerState, ScanProgress, Track } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
 
 const ROW_HEIGHT = 56;
@@ -28,6 +39,8 @@ type View =
   | { kind: "albums" }
   | { kind: "artists" }
   | { kind: "folders" }
+  | { kind: "playlists" }
+  | { kind: "playlist"; id: number }
   | { kind: "album"; key: string }
   | { kind: "artist"; key: string }
   | { kind: "folder"; key: string };
@@ -52,6 +65,17 @@ function groupKeyOf(track: Track, kind: GroupKind): string {
   if (kind === "album") return track.album ?? "(Unknown album)";
   if (kind === "artist") return track.artist ?? "Unknown artist";
   return dirOf(track.path);
+}
+
+/** Case-insensitive title/artist/album filter (playlist detail search). */
+function matches(track: Track, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    track.title.toLowerCase().includes(q) ||
+    (track.artist ?? "").toLowerCase().includes(q) ||
+    (track.album ?? "").toLowerCase().includes(q)
+  );
 }
 
 interface Group {
@@ -103,16 +127,39 @@ function useSearch(query: string, refreshKey: number) {
   return tracks;
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <path fill="currentColor" d="M7 2h2v5h5v2H9v5H7V9H2V7h5z" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="m4.6 3.5 3.4 3.4 3.4-3.4 1.1 1.1-3.4 3.4 3.4 3.4-1.1 1.1-3.4-3.4-3.4 3.4-1.1-1.1 3.4-3.4-3.4-3.4z"
+      />
+    </svg>
+  );
+}
+
 function TrackRow({
   track,
   top,
   isPlaying,
   onPlay,
+  onAdd,
+  onRemove,
 }: {
   track: Track;
   top: number;
   isPlaying: boolean;
   onPlay: () => void;
+  onAdd?: (t: Track) => void;
+  onRemove?: (t: Track) => void;
 }) {
   const artist = track.artist ?? "Unknown artist";
   const album = track.album ?? "";
@@ -140,6 +187,34 @@ function TrackRow({
         </span>
       </span>
       <span className="track-meta">
+        {onAdd && (
+          <button
+            type="button"
+            className="row-btn"
+            title="Add to playlist"
+            aria-label={`Add ${track.title} to a playlist`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdd(track);
+            }}
+          >
+            <PlusIcon />
+          </button>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            className="row-btn"
+            title="Remove from playlist"
+            aria-label={`Remove ${track.title} from this playlist`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(track);
+            }}
+          >
+            <CloseIcon />
+          </button>
+        )}
         <span className="track-badge">{formatBadge(track.format)}</span>
         <span className="track-dur">{formatDuration(track.durationMs)}</span>
       </span>
@@ -161,10 +236,14 @@ function TrackList({
   tracks,
   playingPath,
   onPlay,
+  onAdd,
+  onRemove,
 }: {
   tracks: Track[];
   playingPath: string | null;
   onPlay: (index: number) => void;
+  onAdd?: (t: Track) => void;
+  onRemove?: (t: Track) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -195,6 +274,8 @@ function TrackList({
         top={i * ROW_HEIGHT}
         isPlaying={t.path === playingPath}
         onPlay={() => onPlay(i)}
+        onAdd={onAdd}
+        onRemove={onRemove}
       />,
     );
   }
@@ -218,11 +299,15 @@ function Skeleton({ count }: { count: number }) {
   );
 }
 
-const NAV_ITEMS: Array<{ id: "songs" | "albums" | "artists" | "folders"; label: string }> = [
+const NAV_ITEMS: Array<{
+  id: "songs" | "albums" | "artists" | "folders" | "playlists";
+  label: string;
+}> = [
   { id: "songs", label: "Songs" },
   { id: "albums", label: "Albums" },
   { id: "artists", label: "Artists" },
   { id: "folders", label: "Folders" },
+  { id: "playlists", label: "Playlists" },
 ];
 
 /** Which sidebar entries the current view belongs under (grid or its detail). */
@@ -230,7 +315,49 @@ function homeOf(view: View): View["kind"] {
   if (view.kind === "albums" || view.kind === "album") return "albums";
   if (view.kind === "artists" || view.kind === "artist") return "artists";
   if (view.kind === "folders" || view.kind === "folder") return "folders";
+  if (view.kind === "playlists" || view.kind === "playlist") return "playlists";
   return "songs";
+}
+
+/** Small inline input for naming/renaming a playlist (toolbar). */
+function InlineName({
+  initial,
+  placeholder,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  placeholder?: string;
+  onSave: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  return (
+    <form
+      className="inline-name"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (draft.trim()) onSave(draft.trim());
+      }}
+    >
+      <input
+        autoFocus
+        value={draft}
+        placeholder={placeholder}
+        aria-label="Playlist name"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+      <button type="submit" className="btn-ghost" disabled={!draft.trim()}>
+        Save
+      </button>
+      <button type="button" className="btn-ghost" onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
+  );
 }
 
 function Shell({
@@ -291,6 +418,15 @@ function App() {
   // Active library view: song list, browse grid, or a specific group detail.
   const [view, setView] = useState<View>({ kind: "songs" });
   const tracks = useSearch(query, refreshKey);
+
+  // ---- playlists (M4 slice 1) ----
+  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
+  const [plDetail, setPlDetail] = useState<{ name: string; tracks: Track[] } | null>(null);
+  // Track awaiting a playlist choice (the "+" button on a row).
+  const [addTarget, setAddTarget] = useState<Track | null>(null);
+  const [plDraft, setPlDraft] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -385,6 +521,192 @@ function App() {
     if (tracks !== null && status === "loading") setStatus("ready");
   }, [tracks, status]);
 
+  // ---- playlists: list load, detail load on entry, picker Esc handler ----
+  useEffect(() => {
+    let alive = true;
+    listPlaylists()
+      .then((l) => {
+        if (alive) setPlaylists(l);
+      })
+      .catch((e) => {
+        if (alive) setBanner(`Couldn't load playlists — ${String(e)}`);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (view.kind !== "playlist") return;
+    let alive = true;
+    setPlDetail(null);
+    setRenaming(false);
+    (async () => {
+      try {
+        const detail = await getPlaylistTracks(view.id);
+        if (!alive) return;
+        if (detail === null) {
+          setView({ kind: "playlists" });
+          return;
+        }
+        const list = await listPlaylists();
+        if (!alive) return;
+        setPlaylists(list);
+        setPlDetail({
+          name: list.find((p) => p.id === view.id)?.name ?? "Playlist",
+          tracks: detail,
+        });
+      } catch (e) {
+        if (alive) setBanner(`Couldn't load playlist — ${String(e)}`);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [view]);
+
+  useEffect(() => {
+    if (!addTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAddTarget(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [addTarget]);
+
+  const refreshPlaylists = useCallback(async () => {
+    try {
+      const list = await listPlaylists();
+      setPlaylists(list);
+      if (view.kind === "playlist") {
+        const current = list.find((p) => p.id === view.id);
+        if (!current) {
+          setView({ kind: "playlists" });
+          return;
+        }
+        const detail = await getPlaylistTracks(current.id);
+        setPlDetail({ name: current.name, tracks: detail ?? [] });
+      }
+    } catch (e) {
+      setBanner(`Playlist update failed — ${String(e)}`);
+    }
+  }, [view]);
+
+  const createNew = useCallback(
+    async (name: string) => {
+      try {
+        const id = await createPlaylist(name);
+        setCreating(false);
+        await refreshPlaylists();
+        setView({ kind: "playlist", id });
+      } catch (e) {
+        setBanner(`Couldn't create playlist — ${String(e)}`);
+      }
+    },
+    [refreshPlaylists],
+  );
+
+  const onRename = useCallback(
+    async (name: string) => {
+      if (view.kind !== "playlist") return;
+      try {
+        await renamePlaylist(view.id, name);
+        setRenaming(false);
+        await refreshPlaylists();
+      } catch (e) {
+        setBanner(`Rename failed — ${String(e)}`);
+      }
+    },
+    [view, refreshPlaylists],
+  );
+
+  const onImportM3u = useCallback(async () => {
+    const path = await pickM3uFile();
+    if (!path) return;
+    try {
+      const id = await importM3u(path);
+      setBanner("Playlist imported");
+      await refreshPlaylists();
+      setView({ kind: "playlist", id });
+    } catch (e) {
+      setBanner(`Import failed — ${String(e)}`);
+    }
+  }, [refreshPlaylists]);
+
+  const onExport = useCallback(async () => {
+    if (view.kind !== "playlist") return;
+    const current = (playlists ?? []).find((p) => p.id === view.id);
+    const picked = await pickM3uSave(`${current?.name ?? "playlist"}.m3u`);
+    if (!picked) return;
+    try {
+      await exportM3u(view.id, picked);
+      setBanner("Playlist exported");
+    } catch (e) {
+      setBanner(`Export failed — ${String(e)}`);
+    }
+  }, [view, playlists]);
+
+  const onDelete = useCallback(async () => {
+    if (view.kind !== "playlist") return;
+    const current = (playlists ?? []).find((p) => p.id === view.id);
+    const ok = window.confirm(`Delete playlist “${current?.name ?? "this playlist"}”?`);
+    if (!ok) return;
+    try {
+      await deletePlaylist(view.id);
+      setView({ kind: "playlists" });
+      await refreshPlaylists();
+    } catch (e) {
+      setBanner(`Delete failed — ${String(e)}`);
+    }
+  }, [view, playlists, refreshPlaylists]);
+
+  const onRemoveFromDetail = useCallback(
+    async (track: Track) => {
+      if (view.kind !== "playlist") return;
+      try {
+        await removeFromPlaylist(view.id, track.id);
+        await refreshPlaylists();
+      } catch (e) {
+        setBanner(`Couldn't remove track — ${String(e)}`);
+      }
+    },
+    [view, refreshPlaylists],
+  );
+
+  const addTrackToPlaylist = useCallback(
+    async (playlistId: number) => {
+      const t = addTarget;
+      if (!t) return;
+      try {
+        await addToPlaylist(playlistId, t.id);
+        setBanner(`Added “${t.title}” to playlist`);
+        setAddTarget(null);
+        await refreshPlaylists();
+      } catch (e) {
+        setBanner(`Couldn't add track — ${String(e)}`);
+      }
+    },
+    [addTarget, refreshPlaylists],
+  );
+
+  const addTrackNewPlaylist = useCallback(
+    async (name: string) => {
+      const t = addTarget;
+      if (!t) return;
+      try {
+        const id = await createPlaylist(name);
+        await addToPlaylist(id, t.id);
+        setBanner(`Created playlist with “${t.title}”`);
+        setAddTarget(null);
+        await refreshPlaylists();
+        setView({ kind: "playlist", id });
+      } catch (e) {
+        setBanner(`Couldn't add track — ${String(e)}`);
+      }
+    },
+    [addTarget, refreshPlaylists],
+  );
+
   const onScan = useCallback(async () => {
     setBanner(null);
     setScanNote(null);
@@ -454,9 +776,25 @@ function App() {
   );
 
   const isGrid = gridKind !== null;
-  const isEmpty =
-    status === "ready" && tracks !== null && (isGrid ? groups.length === 0 : showing.length === 0);
-  const activeTracks = groupTracks ?? showing;
+  const isPlaylists = view.kind === "playlists";
+  const isPlaylistDetail = view.kind === "playlist";
+  const currentPlaylist = isPlaylistDetail
+    ? (playlists ?? []).find((p) => p.id === (view as { id: number }).id) ?? null
+    : null;
+  const plName = currentPlaylist?.name ?? plDetail?.name ?? "Playlist";
+  const filteredPlTracks =
+    isPlaylistDetail && plDetail ? plDetail.tracks.filter((t) => matches(t, query)) : null;
+  const ready = status === "ready" && tracks !== null;
+  const isEmpty = ready
+    ? isPlaylists
+      ? playlists !== null && playlists.length === 0
+      : isPlaylistDetail
+        ? plDetail !== null && plDetail.tracks.length === 0 && query.trim() === ""
+        : isGrid
+          ? groups.length === 0
+          : showing.length === 0
+    : false;
+  const activeTracks = filteredPlTracks ?? groupTracks ?? showing;
 
   const onPlay = useCallback(
     (index: number) => {
@@ -477,32 +815,46 @@ function App() {
           ? "Artists"
           : view.kind === "folders"
             ? "Folders"
-            : detailTitle;
+            : view.kind === "playlists"
+              ? "Playlists"
+              : view.kind === "playlist"
+                ? plName
+                : detailTitle;
   const count = isGrid
     ? groups.length
-    : groupKind && groupTracks
-      ? groupTracks.length
-      : showing.length;
+    : isPlaylists
+      ? playlists?.length ?? 0
+      : isPlaylistDetail
+        ? filteredPlTracks?.length ?? 0
+        : groupKind && groupTracks
+          ? groupTracks.length
+          : showing.length;
 
   return (
     <Shell playerState={playerState} view={view} onNavigate={setView}>
       <div className="toolbar">
         <div className="toolbar-title">
-          {groupKind && (
+          {(groupKind || isPlaylistDetail) && (
             <button
               type="button"
               className="back-btn"
-              aria-label={`Back to ${groupKind === "album" ? "Albums" : groupKind === "artist" ? "Artists" : "Folders"}`}
+              aria-label={
+                isPlaylistDetail
+                  ? "Back to Playlists"
+                  : `Back to ${groupKind === "album" ? "Albums" : groupKind === "artist" ? "Artists" : "Folders"}`
+              }
               title="Back"
               onClick={() =>
-                setView({ kind: groupKind === "album" ? "albums" : groupKind === "artist" ? "artists" : "folders" })
+                isPlaylistDetail
+                  ? setView({ kind: "playlists" })
+                  : setView({ kind: groupKind === "album" ? "albums" : groupKind === "artist" ? "artists" : "folders" })
               }
             >
               <BackIcon />
             </button>
           )}
           <h1>{pageTitle}</h1>
-          {tracks !== null && !isEmpty && (
+          {(tracks !== null || isPlaylists || isPlaylistDetail) && !isEmpty && (
             <span className="count">{count.toLocaleString()}</span>
           )}
         </div>
@@ -526,6 +878,58 @@ function App() {
           <button className="btn-primary" onClick={onScan} disabled={scanning || adding}>
             {scanning ? "Scanning…" : "Add folder"}
           </button>
+          {isPlaylists && (
+            <>
+              {creating ? (
+                <InlineName
+                  initial=""
+                  placeholder="Playlist name…"
+                  onSave={(n) => void createNew(n)}
+                  onCancel={() => setCreating(false)}
+                />
+              ) : (
+                <button
+                  className="btn-ghost"
+                  onClick={() => setCreating(true)}
+                  disabled={scanning || adding}
+                >
+                  New playlist
+                </button>
+              )}
+              <button
+                className="btn-ghost"
+                onClick={() => void onImportM3u()}
+                disabled={scanning || adding}
+              >
+                Import .m3u
+              </button>
+            </>
+          )}
+          {isPlaylistDetail && currentPlaylist && (
+            <>
+              {renaming ? (
+                <InlineName
+                  initial={currentPlaylist.name}
+                  onSave={(n) => void onRename(n)}
+                  onCancel={() => setRenaming(false)}
+                />
+              ) : (
+                <button
+                  className="btn-ghost"
+                  onClick={() => setRenaming(true)}
+                  disabled={scanning || adding}
+                >
+                  Rename
+                </button>
+              )}
+              <button className="btn-ghost" onClick={() => void onExport()}>
+                Export
+              </button>
+              <button className="btn-danger" onClick={() => void onDelete()}>
+                Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -566,7 +970,7 @@ function App() {
         </div>
       )}
 
-      {!isGrid && (
+      {!isGrid && !isPlaylists && (
         <div className="track-head" aria-hidden="true">
           <span>Title</span>
           <span className="track-head-dur">Time</span>
@@ -576,6 +980,27 @@ function App() {
       <div className="list-wrap">
         {status === "loading" && tracks === null ? (
           <Skeleton count={16} />
+        ) : (isPlaylists && playlists === null) || (isPlaylistDetail && plDetail === null) ? (
+          <Skeleton count={12} />
+        ) : isEmpty && isPlaylists ? (
+          <div className="empty">
+            <img className="empty-mark" src={iwaksMark} alt="" />
+            <h2>No playlists yet</h2>
+            <p>Create a playlist, or import an .m3u file from disk.</p>
+            <div className="empty-actions">
+              <button className="btn-primary" onClick={() => setCreating(true)}>
+                New playlist
+              </button>
+              <button className="btn-ghost" onClick={() => void onImportM3u()}>
+                Import .m3u
+              </button>
+            </div>
+          </div>
+        ) : isEmpty && isPlaylistDetail ? (
+          <div className="empty">
+            <h2>This playlist is empty</h2>
+            <p>Use the “+” button next to any song to add it here.</p>
+          </div>
         ) : isEmpty ? (
           <div className="empty">
             <img className="empty-mark" src={iwaksMark} alt="" />
@@ -597,6 +1022,51 @@ function App() {
               Try again
             </button>
           </div>
+        ) : isPlaylists ? (
+          <div className="group-grid">
+            {(playlists ?? []).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="group-card playlist-card"
+                onClick={() => setView({ kind: "playlist", id: p.id })}
+              >
+                <span className="playlist-art" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="30" height="30">
+                    <rect
+                      x="3"
+                      y="4"
+                      width="18"
+                      height="16"
+                      rx="3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    />
+                    <path
+                      d="M8 9h8M8 13h8M8 17h5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+                <span className="group-name">{p.name}</span>
+                <span className="group-sub">
+                  {p.trackCount.toLocaleString()} {p.trackCount === 1 ? "song" : "songs"}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : isPlaylistDetail && filteredPlTracks && filteredPlTracks.length === 0 ? (
+          <p className="scan-note">No tracks in this playlist match your search.</p>
+        ) : isPlaylistDetail && filteredPlTracks ? (
+          <TrackList
+            tracks={filteredPlTracks}
+            playingPath={playerState?.current?.path ?? null}
+            onPlay={onPlay}
+            onRemove={(t) => void onRemoveFromDetail(t)}
+          />
         ) : gridKind ? (
           <div className="group-grid">
             {groups.map((g) => (
@@ -632,9 +1102,60 @@ function App() {
             tracks={groupTracks ?? showing}
             playingPath={playerState?.current?.path ?? null}
             onPlay={onPlay}
+            onAdd={(t) => setAddTarget(t)}
           />
         )}
       </div>
+
+      {addTarget && (
+        <div className="picker-backdrop" onClick={() => setAddTarget(null)}>
+          <div
+            className="picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add to playlist"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="picker-title">
+              Add “{addTarget.title}” to…
+            </p>
+            <div className="picker-list">
+              {(playlists ?? []).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="picker-item"
+                  onClick={() => void addTrackToPlaylist(p.id)}
+                >
+                  <span>{p.name}</span>
+                  <span className="count">{p.trackCount}</span>
+                </button>
+              ))}
+              {(playlists?.length ?? 0) === 0 && (
+                <p className="picker-empty">No playlists yet — create one below.</p>
+              )}
+            </div>
+            <form
+              className="picker-new"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (plDraft.trim()) void addTrackNewPlaylist(plDraft.trim());
+              }}
+            >
+              <input
+                autoFocus
+                value={plDraft}
+                placeholder="New playlist name…"
+                aria-label="New playlist name"
+                onChange={(e) => setPlDraft(e.target.value)}
+              />
+              <button type="submit" className="btn-primary" disabled={!plDraft.trim()}>
+                Create &amp; add
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </Shell>
   );
 }

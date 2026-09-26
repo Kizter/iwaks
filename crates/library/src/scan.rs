@@ -154,7 +154,7 @@ pub fn scan_files(
 /// Normalized path key for DB lookups: case-insensitive on all platforms,
 /// and `/`/`\` equivalent — a file picked from a dialog can carry either
 /// separator on Windows, while walking a folder yields the other.
-fn norm(p: &str) -> String {
+pub(crate) fn norm(p: &str) -> String {
     p.to_lowercase().replace('\\', "/")
 }
 

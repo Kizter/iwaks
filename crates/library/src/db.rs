@@ -6,7 +6,7 @@ use iwaks_core::track::Track;
 use rusqlite::Connection;
 
 /// Schema v1: denormalized tracks table + FTS5 external-content index.
-/// `albums`/`artists` tables arrive with the browse UI (M4) — see design.md.
+/// Albums/artists stay frontend-derived (grouping) — no join tables needed.
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,13 +55,37 @@ CREATE TRIGGER IF NOT EXISTS tracks_au AFTER UPDATE ON tracks BEGIN
 END;
 ";
 
+/// Schema v2: playlists (M4 slice 1). Track order lives in
+/// `playlist_tracks.position`; the (playlist_id, track_id) primary key
+/// dedupes entries. Foreign keys cascade deletes both ways.
+const SCHEMA_V2: &str = "
+CREATE TABLE IF NOT EXISTS playlists (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    name     TEXT    NOT NULL,
+    m3u_path TEXT
+);
+
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, track_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position);
+";
+
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
     #[error("database error: {0}")]
     Sql(#[from] rusqlite::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("unsupported schema version {0} (this build supports v1)")]
+    #[error("invalid input: {0}")]
+    Invalid(String),
+    #[error("not found: {0}")]
+    NotFound(String),
+    #[error("unsupported schema version {0} (this build supports v2)")]
     UnsupportedSchema(i32),
 }
 
@@ -88,11 +112,19 @@ impl Library {
         match version {
             0 => {
                 conn.execute_batch(SCHEMA_V1)?;
-                conn.pragma_update(None, "user_version", 1)?;
+                conn.execute_batch(SCHEMA_V2)?;
+                conn.pragma_update(None, "user_version", 2)?;
             }
-            1 => {}
+            1 => {
+                conn.execute_batch(SCHEMA_V2)?;
+                conn.pragma_update(None, "user_version", 2)?;
+            }
+            2 => {}
             other => return Err(LibraryError::UnsupportedSchema(other)),
         }
+        // Cascade playlist entries / playlist rows when a track or playlist
+        // is deleted from the library (scan pruning, playlist removal).
+        conn.pragma_update(None, "foreign_keys", true)?;
         Ok(Library { conn })
     }
 
@@ -209,9 +241,15 @@ impl Library {
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
+
+    /// Mutable low-level access (crate-internal — used by playlist
+    /// transactions today).
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
 }
 
-fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
+pub(crate) fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
     Ok(Track {
         id: row.get(0)?,
         path: row.get(1)?,

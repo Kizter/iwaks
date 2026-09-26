@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import type { Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -152,6 +152,72 @@ export function playerStop(): Promise<void> {
 /** Initial state; `null` when playback is unavailable (missing libmpv). */
 export function getPlayerState(): Promise<PlayerState | null> {
   return invoke<PlayerState | null>("get_player_state");
+}
+
+// ---------- playlists (M4 slice 1) ----------
+
+export function listPlaylists(): Promise<Playlist[]> {
+  return invoke<Playlist[]>("list_playlists");
+}
+
+export function createPlaylist(name: string): Promise<number> {
+  return invoke<number>("create_playlist", { name });
+}
+
+export function renamePlaylist(id: number, name: string): Promise<void> {
+  return invoke<void>("rename_playlist", { id, name });
+}
+
+export function deletePlaylist(id: number): Promise<void> {
+  return invoke<void>("delete_playlist", { id });
+}
+
+/** Tracks in stored order; `null` when the playlist doesn't exist. */
+export function getPlaylistTracks(id: number): Promise<Track[] | null> {
+  return invoke<Track[] | null>("get_playlist_tracks", { id });
+}
+
+export function addToPlaylist(playlistId: number, trackId: number): Promise<void> {
+  return invoke<void>("add_to_playlist", { playlistId, trackId });
+}
+
+export function removeFromPlaylist(playlistId: number, trackId: number): Promise<void> {
+  return invoke<void>("remove_from_playlist", { playlistId, trackId });
+}
+
+/** Replace a playlist's order with `trackIds` (also drops unlisted entries). */
+export function reorderPlaylist(playlistId: number, trackIds: number[]): Promise<void> {
+  return invoke<void>("reorder_playlist", { playlistId, trackIds });
+}
+
+/** Import an `.m3u` file as a new playlist; resolves to its id. */
+export function importM3u(path: string): Promise<number> {
+  return invoke<number>("import_m3u", { path });
+}
+
+export function exportM3u(playlistId: number, path: string): Promise<void> {
+  return invoke<void>("export_m3u", { playlistId, path });
+}
+
+/** Native picker for choosing an `.m3u` file to import; `null` on cancel. */
+export async function pickM3uFile(): Promise<string | null> {
+  const picked = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "Playlists", extensions: ["m3u"] }],
+    title: "Import playlist",
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Native save dialog for exporting a playlist; `null` on cancel. */
+export async function pickM3uSave(defaultPath: string): Promise<string | null> {
+  const picked = await save({
+    defaultPath,
+    filters: [{ name: "Playlists", extensions: ["m3u"] }],
+    title: "Export playlist",
+  });
+  return typeof picked === "string" ? picked : null;
 }
 
 /** Live playback state: fires ~4×/second plus on every change/command. */

@@ -1,6 +1,7 @@
-//! SQLite library: schema, FTS5 search, incremental scanner.
+//! SQLite library: schema, FTS5 search, incremental scanner, playlists.
 //! M1 scope: tracks table + tracks_fts, scan, basic queries.
-//! (albums/artists join tables land with the browse UI in M4.)
+//! M4 slice 1: playlists + playlist_tracks + `.m3u` import/export.
 
 pub mod db;
+pub mod playlists;
 pub mod scan;

@@ -35,6 +35,13 @@ export interface ScanEvent {
   finished: boolean;
 }
 
+/** Matches iwaks_library::playlists::Playlist (serde camelCase). */
+export interface Playlist {
+  id: number;
+  name: string;
+  trackCount: number;
+}
+
 /** Matches iwaks_player::queue::RepeatMode (serde lowercase). */
 export type RepeatMode = "off" | "all" | "one";
 
