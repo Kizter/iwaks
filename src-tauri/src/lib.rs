@@ -318,12 +318,30 @@ fn open_mini_window(app: &AppHandle) -> Result<(), String> {
 
 /// Open the mini visualizer when the main window is minimized, close it when
 /// the main window comes back.
-fn sync_mini(app: &AppHandle, minimized: bool) {
-    if minimized {
-        let _ = open_mini_window(app);
-    } else if let Some(mini) = app.get_webview_window(MINI_LABEL) {
-        let _ = mini.close();
-    }
+///
+/// The open/close is **deferred off the window-event callback**: creating a
+/// WebView2 window synchronously inside `Resized` (which Windows fires mid
+/// minimize-transition) blocks the main thread's loop → the main app becomes
+/// unclickable and the mini window arrives as a white, not-responding screen.
+/// We wait for the transition to settle, re-check `is_minimized()`, then run
+/// the create/close on the main loop via `run_on_main_thread`.
+fn sync_mini(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let inner = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            let minimized = inner
+                .get_webview_window("main")
+                .map(|w| w.is_minimized().unwrap_or(false))
+                .unwrap_or(false);
+            if minimized {
+                let _ = open_mini_window(&inner);
+            } else if let Some(mini) = inner.get_webview_window(MINI_LABEL) {
+                let _ = mini.close();
+            }
+        });
+    });
 }
 
 /// Manual toggle from the player bar (independent of the minimized state).
@@ -462,11 +480,9 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 main.on_window_event(move |event| match event {
                     tauri::WindowEvent::Resized(_) => {
-                        let minimized = main_handle
-                            .get_webview_window("main")
-                            .map(|w| w.is_minimized().unwrap_or(false))
-                            .unwrap_or(false);
-                        sync_mini(&main_handle, minimized);
+                        // Re-check the actual minimize state after the
+                        // transition settles — see `sync_mini`.
+                        sync_mini(&main_handle);
                     }
                     tauri::WindowEvent::Destroyed => {
                         if let Some(mini) = main_handle.get_webview_window(MINI_LABEL) {
