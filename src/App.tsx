@@ -64,6 +64,34 @@ function nameOfDir(dir: string): string {
   return i < 0 ? trimmed : trimmed.slice(i + 1);
 }
 
+/** Parent directory of `dir` (separator-agnostic), or `null` at a drive/root. */
+function parentOf(dir: string): string | null {
+  const trimmed = dir.replace(/[\\/]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return i <= 0 ? null : trimmed.slice(0, i);
+}
+
+/** Root→leaf segments of a directory path, each with its full dir path. */
+function folderSegments(path: string): Array<{ part: string; dir: string }> {
+  const segs: Array<{ part: string; dir: string }> = [];
+  let rest = path.replace(/[\\/]+$/, "");
+  for (;;) {
+    const i = Math.max(rest.lastIndexOf("/"), rest.lastIndexOf("\\"));
+    if (i < 0) {
+      if (rest) segs.unshift({ part: rest, dir: rest });
+      break;
+    }
+    segs.unshift({ part: rest.slice(i + 1), dir: rest });
+    rest = rest.slice(0, i);
+  }
+  return segs;
+}
+
+/** Case-insensitive sort of folder paths by display name. */
+function folderNameCompare(a: string, b: string): number {
+  return nameOfDir(a).localeCompare(nameOfDir(b), undefined, { sensitivity: "base" });
+}
+
 /** Group key a track belongs to — must match `groupBy` exactly. */
 function groupKeyOf(track: Track, kind: GroupKind): string {
   if (kind === "album") return track.album ?? "(Unknown album)";
@@ -109,6 +137,55 @@ function groupBy(tracks: Track[], kind: GroupKind): Group[] {
     });
   }
   return groups.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}
+
+// ---- folder browse tree (M4 slice 3) — hierarchy derived client-side ----
+
+/** Stats of one directory node in the folder browse tree. */
+interface FolderStat {
+  /** Tracks directly inside this folder (not its subfolders). */
+  direct: number;
+  /** Direct subfolders that also contain tracks. */
+  subfolder: number;
+  /** First track for card art and ordering. */
+  cover: Track;
+}
+
+interface FolderTree {
+  /** All library directories, keyed by path → stats. */
+  stats: Map<string, FolderStat>;
+  /** Top-level roots: directories whose parent has no tracks of its own. */
+  roots: string[];
+}
+
+/**
+ * Build the folder hierarchy from the library: every distinct directory is a
+ * node; a directory is a *root* when its parent holds no tracks itself, and a
+ * node's children are the directories whose parent is exactly that node.
+ */
+function buildFolderTree(tracks: Track[]): FolderTree {
+  const direct = new Map<string, { n: number; cover: Track }>();
+  for (const t of tracks) {
+    const dir = dirOf(t.path);
+    const cur = direct.get(dir);
+    direct.set(dir, { n: (cur?.n ?? 0) + 1, cover: cur?.cover ?? t });
+  }
+  const sub = new Map<string, number>();
+  for (const dir of direct.keys()) {
+    const p = parentOf(dir);
+    if (p !== null && direct.has(p)) sub.set(p, (sub.get(p) ?? 0) + 1);
+  }
+  const stats = new Map<string, FolderStat>();
+  for (const [dir, { n, cover }] of direct) {
+    stats.set(dir, { direct: n, subfolder: sub.get(dir) ?? 0, cover });
+  }
+  const roots = [...direct.keys()]
+    .filter((d) => {
+      const p = parentOf(d);
+      return p === null || !direct.has(p);
+    })
+    .sort(folderNameCompare);
+  return { stats, roots };
 }
 
 /** Debounced search-as-you-type hook. Blank query → full library. */
@@ -423,6 +500,108 @@ function QueueList({
         {rows}
       </ul>
     </div>
+  );
+}
+
+/**
+ * Breadcrumb for a folder detail: every path segment is clickable and drills
+ * back up to that directory; the last segment marks the current folder.
+ */
+function FolderCrumb({
+  path,
+  onNavigate,
+}: {
+  path: string;
+  onNavigate: (dir: string) => void;
+}) {
+  const segs = folderSegments(path);
+  const last = segs.length - 1;
+  return (
+    <nav className="folder-crumb" aria-label="Folder path">
+      <ol>
+        {segs.map((s, i) => (
+          <li key={`${s.dir}-${i}`}>
+            {i > 0 && (
+              <span className="crumb-sep" aria-hidden="true">
+                ›
+              </span>
+            )}
+            {i === last ? (
+              <span className="crumb-current" title={s.dir}>
+                {s.part}
+              </span>
+            ) : (
+              <button type="button" title={s.dir} onClick={() => onNavigate(s.dir)}>
+                {s.part}
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/**
+ * Detail of one folder in the browse tree (M4 slice 3): clickable subfolder
+ * cards on top, then the folder's own tracks — Poweramp-style drill-down, so
+ * a folder plays exactly the files directly inside it.
+ */
+function FolderDetail({
+  children,
+  stats,
+  tracks,
+  playingPath,
+  noTracksNote,
+  onOpen,
+  onPlay,
+  onAdd,
+}: {
+  children: string[];
+  stats: Map<string, FolderStat>;
+  tracks: Track[];
+  playingPath: string | null;
+  noTracksNote: string;
+  onOpen: (dir: string) => void;
+  onPlay: (index: number) => void;
+  onAdd: (t: Track) => void;
+}) {
+  return (
+    <>
+      {children.length > 0 && (
+        <section className="subfolders" aria-label="Subfolders">
+          <h2 className="subfolders-title">Subfolders</h2>
+          <div className="group-grid">
+            {children.map((dir) => {
+              const s = stats.get(dir)!;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  className="group-card"
+                  title={dir}
+                  onClick={() => onOpen(dir)}
+                >
+                  <Cover track={s.cover} />
+                  <span className="group-name">{nameOfDir(dir)}</span>
+                  <span className="group-sub">
+                    {s.direct} {s.direct === 1 ? "song" : "songs"}
+                    {s.subfolder > 0
+                      ? ` · ${s.subfolder} ${s.subfolder === 1 ? "subfolder" : "subfolders"}`
+                      : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {tracks.length === 0 ? (
+        <p className="scan-note">{noTracksNote}</p>
+      ) : (
+        <TrackList tracks={tracks} playingPath={playingPath} onPlay={onPlay} onAdd={onAdd} />
+      )}
+    </>
   );
 }
 
@@ -962,6 +1141,21 @@ function App() {
       groupKind && groupKey ? showing.filter((t) => groupKeyOf(t, groupKind) === groupKey) : null,
     [groupKind, groupKey, showing],
   );
+  // Folder browse tree (M4 slice 3). Derived from `showing` (search-filtered)
+  // for consistency with the other browse grids.
+  const folderTree = useMemo(
+    () => (gridKind === "folders" || groupKind === "folder" ? buildFolderTree(showing) : null),
+    [gridKind, groupKind, showing],
+  );
+  const folderChildren = useMemo(
+    () =>
+      folderTree && groupKind === "folder" && groupKey
+        ? [...folderTree.stats.keys()]
+            .filter((d) => d !== groupKey && parentOf(d) === groupKey)
+            .sort(folderNameCompare)
+        : null,
+    [folderTree, groupKind, groupKey],
+  );
 
   const isGrid = gridKind !== null;
   const isPlaylists = view.kind === "playlists";
@@ -1048,7 +1242,17 @@ function App() {
               <BackIcon />
             </button>
           )}
-          <h1>{pageTitle}</h1>
+          {groupKind === "folder" && groupKey ? (
+            <>
+              <h1 className="visually-hidden">{pageTitle}</h1>
+              <FolderCrumb
+                path={groupKey}
+                onNavigate={(dir) => setView({ kind: "folder", key: dir })}
+              />
+            </>
+          ) : (
+            <h1>{pageTitle}</h1>
+          )}
           {(tracks !== null || isPlaylists || isPlaylistDetail) && !isEmpty && (
             <span className="count">{count.toLocaleString()}</span>
           )}
@@ -1185,7 +1389,7 @@ function App() {
         </div>
       )}
 
-      {!isGrid && !isPlaylists && (
+      {!isGrid && !isPlaylists && !(groupKind === "folder" && (folderChildren?.length ?? 0) > 0) && (
         <div className="track-head" aria-hidden="true">
           <span>Title</span>
           <span className="track-head-dur">Time</span>
@@ -1299,6 +1503,30 @@ function App() {
             onPlay={onPlay}
             onRemove={(t) => void onRemoveFromDetail(t)}
           />
+        ) : gridKind === "folders" && folderTree ? (
+          <div className="group-grid">
+            {folderTree.roots.map((dir) => {
+              const s = folderTree.stats.get(dir)!;
+              return (
+                <button
+                  key={dir}
+                  type="button"
+                  className="group-card"
+                  title={dir}
+                  onClick={() => setView({ kind: "folder", key: dir })}
+                >
+                  <Cover track={s.cover} />
+                  <span className="group-name">{nameOfDir(dir)}</span>
+                  <span className="group-sub">
+                    {s.direct} {s.direct === 1 ? "song" : "songs"}
+                    {s.subfolder > 0
+                      ? ` · ${s.subfolder} ${s.subfolder === 1 ? "subfolder" : "subfolders"}`
+                      : ""}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         ) : gridKind ? (
           <div className="group-grid">
             {groups.map((g) => (
@@ -1327,6 +1555,23 @@ function App() {
               </button>
             ))}
           </div>
+        ) : groupKind === "folder" && groupKey && folderTree ? (
+          <FolderDetail
+            children={folderChildren ?? []}
+            stats={folderTree.stats}
+            tracks={groupTracks ?? []}
+            playingPath={playerState?.current?.path ?? null}
+            noTracksNote={
+              query.trim() === ""
+                ? (folderChildren?.length ?? 0) > 0
+                  ? "No tracks directly in this folder — music lives in the subfolders below."
+                  : "No tracks in this folder."
+                : "No tracks in this folder match your search."
+            }
+            onOpen={(dir) => setView({ kind: "folder", key: dir })}
+            onPlay={onPlay}
+            onAdd={(t) => setAddTarget(t)}
+          />
         ) : groupKind && groupTracks && groupTracks.length === 0 ? (
           <p className="scan-note">No tracks in this {groupKind} match your search.</p>
         ) : (

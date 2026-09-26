@@ -1361,3 +1361,69 @@ input[type="range"]:disabled {
 .queue-row:hover .queue-handle {
   opacity: 1;
 }
+
+/* ---------- folder browse (M4 slice 3) ---------- */
+
+.folder-crumb {
+  min-width: 0;
+}
+.folder-crumb ol {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.folder-crumb li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.folder-crumb button {
+  max-width: 240px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.folder-crumb button:hover {
+  background: var(--mint);
+  color: var(--ink);
+}
+.folder-crumb .crumb-current {
+  padding: 2px 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.folder-crumb .crumb-sep {
+  color: var(--text-dim);
+}
+
+.subfolders {
+  margin-bottom: 18px;
+}
+.subfolders-title {
+  margin: 0 0 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
