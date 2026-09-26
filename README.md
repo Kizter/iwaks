@@ -1,15 +1,16 @@
 # 🐟 Iwaks
 
-**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop, 
+**Hi-res & lossless offline music player for Windows** — a Poweramp-like experience for the desktop. 
 
-Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WASAPI (bit-perfect)**.
+Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WASAPI** (shared mode default; exclusive opt-in).
 
 ## Features (roadmap)
 
 - ✅ **M0** — Scaffold, CI, benchmark baseline, branding
 - ✅ **M1** — Library core, SQLite scanner, FTS5 search, library UI
-- ✅ **M2** — Playback (libmpv), player bar *(current)*
-- ✅ **M3** — speed + sleep timer, EQ + ReplayGain, lyrics, visualizer
+- ✅ **M2** — Playback (libmpv), player bar
+- ✅ **M3** — speed + sleep timer, EQ + ReplayGain, lyrics, generative visualizer
+- ✅ **Post-M3** — shared-WASAPI audio fix, add files / scan folder, shuffle + reshuffle, Albums / Artists / Folders browse, mini visualizer window on minimize
 - ⏳ **M4** — Playlists, queue, folder browse, tag editor
 - ⏳ **M5** — Casting (DLNA → Chromecast), installer, release
 

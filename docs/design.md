@@ -1,14 +1,14 @@
 # Iwaks — Design Document (v1)
 
 > Music player desktop Windows untuk audio hi-res & lossless offline, ala Poweramp Android.
-> Stack: **Tauri v2 + Rust + libmpv → WASAPI exclusive + SQLite + React/TS/Tailwind**.
+> Stack: **Tauri v2 + Rust + libmpv → WASAPI + SQLite + React/TS/Tailwind**.
 
 ---
 
 ## 1. Understanding Summary
 
 1. **Apa:** Aplikasi desktop Windows — music player hi-res & lossless offline ala Poweramp, dark modern, album art besar.
-2. **Mengapa:** Pengalaman mendengarkan musik lokal berkualitas tinggi (bit-perfect) di PC.
+2. **Mengapa:** Pengalaman mendengarkan musik lokal berkualitas tinggi di PC.
 3. **Untuk siapa:** Pemakaian pribadi, lalu dibagikan publik via GitHub (open source, bisa di-install orang lain).
 4. **Kendala:** Windows saja • Tauri v2 + Rust • libmpv → WASAPI • SQLite (skala medium 1.000–20.000 lagu).
 5. **Format audio:** Semua — FLAC/WAV/ALAC, MP3/AAC/OGG/Opus, WavPack/AIFF/WMA Lossless, DSD (DSF/DFF).
@@ -33,7 +33,7 @@
 | # | Keputusan | Alternatif | Alasan |
 |---|---|---|---|
 | D1 | Pakai sendiri + share GitHub | — | Per user |
-| D2 | Windows saja | macOS / Linux | WASAPI exclusive; fokus |
+| D2 | Windows saja | macOS / Linux | WASAPI; fokus |
 | D3 | Semua format audio | subset | Per user |
 | D4 | EQ + gapless/crossfade/ReplayGain + sleep timer/speed | resampler terpisah | Per user; resampler = A1 |
 | D5 | Scanner+tag, search+filter, playlist+queue | — | Per user |
@@ -61,7 +61,6 @@ iwaks/
 │   ├── audio/          # Wrapper libmpv: playback, EQ, volume, events, output devices
 │   ├── library/        # SQLite (rusqlite), scanner background, search FTS5, migrasi
 │   ├── tags/           # Baca/tulis tag via lofty (tag editor + backup/rollback)
-│   ├── visualizer/     # Decode paralel ringan (symphonia) → FFT (rustfft) → spektrum
 │   ├── cast/           # Trait CastTarget: UPnP/DLNA, CASTV2 (nanti)
 │   └── app/            # Binary Tauri: komposisi state, IPC commands, events
 └── src/ (frontend)
@@ -77,7 +76,7 @@ iwaks/
 
 | Aspek | Keputusan |
 |---|---|
-| Output | `ao=wasapi` exclusive mode (bit-perfect, buka perangkat sesuai sample rate file) |
+| Output | `ao=wasapi` **shared mode (default)** — exclusive mode membuat semua aplikasi lain senyap selama sesi, jadi shared dipilih; exclusive tetap tersedia via opsi (deviasi — lihat Amendemen M3 slice 5) |
 | Gapless | Bawaan libmpv (on) |
 | Crossfade | Dua instance libmpv + volume ramp — toggle, default off |
 | EQ | `af=lavfi[equalizer]` 10 band + preamp + bass/treble |
@@ -86,7 +85,7 @@ iwaks/
 | Resampler | `audio-resampler=soxr` (A1) |
 | DSD | DSD-over-PCM via WASAPI bila device mendukung; fallback PCM (soxr) |
 
-Event/command Tauri: `play`, `pause`, `seek`, `next/prev`, `set_volume`, `set_eq`, `set_replaygain`, `set_output_device`; events keluar `track-change`, `position`, `playback-ended`, `device-list-changed`, `error`.
+Event/command Tauri: `play`, `pause`, `seek`, `next/prev`, `set_volume`, `set_eq`, `set_replaygain`, `set_output_device`, `set_shuffle`, `reshuffle_tracks`, `add_files`, `toggle_mini_visualizer`; events keluar `track-change`, `position`, `playback-ended`, `device-list-changed`, `error`.
 
 Edge cases: file corrupt → toast + auto-skip; device hilang → pause + notifikasi; rate mismatch → soxr.
 
@@ -107,16 +106,20 @@ playlist_tracks(playlist_id, track_id, position)
 - **Amendemen M3 (slice 1 — speed + sleep timer):** `speed` = properti libmpv, di-set via `Cmd::SetSpeed` → `set speed <v>`, di-clamp 0.25–4.0 di public API (setara `set_volume`); state baru `speed` (default 1.0) dibaca tiap tick. Sleep timer hidup di Rust sebagai source of truth: `sleep_deadline: Mutex<Option<Instant>>`; pump memeriksa deadline tiap loop → saat lewat, deadline dikosongkan dan `Cmd::SleepElapsed` diantre → `set pause yes` (hanya *pause*: queue tetap termuat sehingga resume sekali tekan; `stopped` tidak di-set). State baru `sleep_remaining: Option<f64>` = sisa detik (0 saat lewat-tapi-belum-dieksekusi), hilang saat timer habis/dibatalkan. Batal via `set_sleep_timer(None)` atau nilai ≤0 (nilai non-finite diabaikan). Command Tauri baru: `set_speed`, `set_sleep_timer`. Test headless: roundtrip `speed` + clamp atas/bawah, sleep timer mem-pause, cancel membuat timer tidak mem-pause.
 - **Amendemen M3 (slice 2 — EQ + ReplayGain):** EQ memakai `af=lavfi[equalizer]` sesuai §4.2: 10 band ISO (31…16k Hz, lebar 1 oktaf, `t=o`) + preamp sebagai *master gain* (`volume` filter di akhir chain). Chain dibangun oleh fungsi murni `eq_af_chain(preamp, gains) -> Option<String>` (flat = `None` → `set af ""` — terverifikasi di probe mpv 0.41 bahwa string kosong benar-benar membersihkan chain); nilai di-clamp ±12 dB & dibulatkan 0,1 dB, band yang hilang dipad nol. Bass/treble pada §4.2 dicakup oleh band ujung (31/62 & 8k/16k) — shelf filter terpisah tidak dibuat (penyederhanaan, dokumentasi deviasi). `set_eq` menyimpan nilai di `Mutex<EqSettings>` (source of truth frontend) lalu set `af`; state baru `eq_preamp` + `eq: Vec<f64>`. ReplayGain: opsi startup `replaygain=track` (+ `preamp=0`, `clip=yes`, `fallback=0`) sesuai §4.2; mode bisa diganti runtime (`set replaygain <mode>`) dan **dibaca balik tiap tick** via properti string (ffi baru `get_string` + binding `mpv_free`). Contoh nyata mpv: nilai off adalah **`no`**, bukan `off` (`--replaygain=<no|track|album>`) — `ReplayGainMode` serde lowercase (`off|track|album`) dipetakan ke `no|track|album` saat ke mpv. Perubahan mode berlaku mulai file berikutnya dimuat. Command Tauri: `set_eq`, `set_replaygain`. Test: chain builder (flat/1 band/preamp/clamp) + roundtrip mode RG + EQ apply→clear tanpa mengganggu playback.
 - **Amendemen M3 (slice 3 — lirik):** modul `crates/tags/src/lyrics.rs`. Embedded lyrics dibaca via `lofty` `ItemKey::Lyrics` — satu key yang memetakan USLT (ID3), `LYRICS` (Vorbis), dan `©lyr` (iTunes), jadi satu jalur baca untuk semua format yang didukung; sinkronisasi waktu **tidak** tersedia di embedded (lofty 0.22 tidak punya SYLT), jadi `.lrc` sidecar (`path.with_extension("lrc")`) adalah sumber timed. Prioritas: baris *timed* dari sidecar `.lrc` menang; bila tak ada sidecar, teks embedded yang mengandung timestamp di-auto-parse sebagai LRC; teks *plain* = embedded bila ada, fallback konten sidecar mentah. `parse_lrc` fungsi murni: `[mm:ss]`, `[mm:ss.xx]`, `[hh:mm:ss.xx]`, multi-timestamp per baris, `[offset:±ms]` diterapkan ke semua timestamp (clamp ≥ 0), tag metadata (`[ti:]`, `[ar:]`, …) dilewati, hasil diurutkan naik. Command Tauri `get_lyrics(path)` → `Option<Lyrics { timed, plain }>` (camelCase, dipanggil on-demand saat panel dibuka — tanpa state baru di player). Frontend: tombol lirik di player bar → popover (seperti EQ); baris aktif = timestamp terakhir ≤ posisi playback (dari tick state, ~10 Hz), auto-scroll smooth ke tengah, jatuh ke tampilan teks polos saat tak ada timed. Test (9 baru, fixture FLAC Vorbis-comment seperti cover.rs): parse timestamp/offset/negatif-clamp/metadata-dilewati, embedded `LYRICS` terbaca, sidecar menang atas embedded + fallback plain, embedded-LRC diparse untuk timing, tanpa lirik → `None`.
-- **Amendemen M3 (slice 4 — visualizer):** crate baru `crates/visualizer` (per struktur §4.1). Dekode via `symphonia` (features: flac/wav/aiff/isomp4+aac+alac/mp3/ogg+vorbis/pcm) → downmix ke mono → Hann window 2048 + FFT (`rustfft`) → **60 bin log-spaced 20 Hz–20 kHz** (edge atas di-clamp ke Nyquist; band DC & mirror-half dibuang) → timeline penuh `Spectrum { fps: 30, bins: 60, frames }`, magnitudo ternormalisasi 0..=1 (full-scale sine ≈ 1.0), cap `MAX_FRAMES` 54k (≈ 30 menit). **Deviasi dari desain §4.2 (decode paralel live + event Tauri 30fps):** analyze full-timeline **sekali per track** di `spawn_blocking` — sinkron tetap "via timestamp", tapi frontend yang memetakan posisi playback → frame index (seek/scrub *gratis*, tanpa drift, tanpa thread decode live). Panjang decode sekali jalan (~detik di release), dilunakkan `SpectrumCache` (1 entri, AppState) → membuka ulang panel instan. Frontend: tombol visualizer di player bar → popover `<canvas>`; loop rAF menyampling frame sesuai posisi (diekstrapolasi antar-tick state ~10 Hz memakai speed), smoothing bar (attack cepat / release lambat), turun ke nol saat pause/stop, HiDPI-aware. Format tanpa decoder symphonia (**Opus, WavPack, WMA, DSD**) → fallback "No spectrum" (playback tetap via libmpv). Command: `get_spectrum(path) -> Result<Spectrum, String>` (async; borrowing state → wajib return `Result`). Test (8): band edges log-spaced + clamp Nyquist, downmix mono, sine 440 Hz → band dominan ±, silence ≈ 0, frame rate ≈ fps×durasi, fixture WAV end-to-end, file garbage → `Unsupported`, cache hit/evict.
+- **Amendemen M3 (slice 4 — visualizer, ditulis ulang):** crate `crates/visualizer` (symphonia + rustfft) **dihapus** dari workspace (Cargo.toml + src-tauri dep ikut dibersihkan). Visualizer kini **generatif bawaan** (`src/Visualizer.tsx`): canvas digambar dari kode, **bukan dari decode track** — tanpa FFT, tanpa decode paralel. Seeder `fnvhash(path) -> u32` (FNV-1a atas path file) membuat pola bar konsisten per lagu; 48/64 bar, denyut ~114 BPM, smoothing attack 0,45 / release 0,08, gradient panel + mini. **Mini window:** jendela frameless `label="mini"` (always-on-top, skip-taskbar, resizable) memuat `index.html#mini` → `src/MiniViz.tsx` (visualizer + kontrol, ✕ = `getCurrentWindow().close()`); **terbuka otomatis saat window utama di-minimize** (setup `on_window_event`: `Resized` → `sync_mini` via `is_minimized()`, `Destroyed` → tutup mini + `exit(0)`) + tombol toggle manual di player bar. Command Tauri baru: `open_mini_window`, `sync_mini`, `toggle_mini_visualizer`; `get_spectrum`/`Spectrum` dihapus (frontend `types.ts`/`api.ts` ikut dibersihkan). Gate: `npm run build` (murni frontend, tanpa Rust crate baru).
+- **Amendemen M3 (slice 5 — audio, bug shared mode):** default `Options.audio_exclusive` di `crates/player/src/player.rs` diubah **`true` → `false`** → WASAPI **shared** — **deviasi dari §4.2 "bit-perfect"**: exclusive mode mengunci perangkat sample-accurately sehingga app lain (Discord/YouTube) senyap selama sesi, yang mengejutkan user. Shared = default; exclusive tetap bisa diaktifkan via opsi. Test: `defaults_use_shared_wasapi_audio`.
+- **Amendemen M3 (slice 6 — tambah musik):** `scan_files(lib, paths, …)` di `crates/library/src/scan.rs` (tambah file tertentu — multi-select dialog; tanpa rekursi/pruning) + command Tauri `add_files`; frontend `pickFiles` (multi-file via plugin dialog) + tombol "Add files" + **refresh otomatis daftar setelah scan/add** lewat `refreshKey` (dibump di `listenScan` finished & `onAddFiles` — perbaikan "list yang harus diperbaiki"). Scan folder (`scan_folder`) menumpuk multi-root seperti desain. Kunci dedupe `norm()` kini menyamakan `/` dan `\` (path dialog bisa campur separator di Windows) + case-fold, sehingga re-add/re-scan collapse ke baris yang sama (`ON CONFLICT(path)`).
+- **Amendemen M3 (slice 7 — shuffle + reshuffle):** queue (`crates/player/src/queue.rs`) memakai **permutasi order** deterministik (SplitMix64, tanpa dep rand): mengaktifkan shuffle mem-pin track saat ini ke **posisi 0** permutasi → "next" berjalan melewati seluruh daftar (tidak melompat ke tengah saat toggle di tengah lagu); `reshuffle(seed)` mengocok ulang sisa (posisi saat ini tetap); matikan shuffle → identity. `next_shuffle_seed` (AtomicU64, start `0xDEADBEEF`, step `0x9E3779B97F4A7C15`) bertambah tiap lagu; shuffle dipertahankan lewat `play_tracks`. State baru `shuffle` di `PlayerState` (di-*readback*); command Tauri: `set_shuffle`, `reshuffle_tracks`; UI: toggle shuffle + tombol dice (reshuffle). Test headless: roundtrip pin-current/reshuffle/persist (pump memegang libmpv, handler touch-queue tidak memanggil `play_index`).
+- **Amendemen M3 (slice 8 — navigasi library):** sidebar Songs/Albums/Artists/Folders menjadi view nyata (`view` state di `App.tsx`); Albums/Artists/Folders **diturunkan frontend-side** dari `getTracks()` (`groupBy` — grup album/artist/folder, kartu grid memakai cover track pertama, urutan alphabet case-insensitive); klik kartu → daftar lagu grup (play dari posisi grup, filter search tetap berlaku), tombol back + judul breadcrumb (`back-btn`); link Playlists **ditunda** (keputusan user) dan dihapus dari nav. `refreshKey` juga mem-perbarui grid setelah scan/add.
 - Folder browse: view langsung struktur folder, baca tag on-the-fly + cache tipis.
 - Tag editor: FLAC (Vorbis), MP3 (ID3v2), M4A, OGG, WavPack, AIFF, DSF/DFF; backup `.bak` sebelum tulis; via `lofty`.
 - Playlist: internal SQLite + impor/ekspor `.m3u`; queue sesi (drag-reorder, save-as-playlist).
 
 ### 4.4 UI/UX (frontend)
 
-- Layout: sidebar (Musik/Artis/Album/Genre/Playlist/Folder) + konten + player bar selalu tampak + Now Playing (art besar, lirik, visualizer).
+- Layout: sidebar (Songs/Albums/Artists/Folders — Playlists ditunda) + konten + player bar selalu tampak + Now Playing (art besar, lirik, visualizer).
 - Prinsip skill: kontras WCAG AA, semua state ada (loading/empty/error), motion `cubic-bezier(0.23,1,0.32,1)` + `prefers-reduced-motion`, anti-template generik, art sebagai elemen hero.
-- Visualizer: decode paralel symphonia untuk FFT (sinkron via timestamp) → 60–120 bin → event Tauri 30fps (throttle) → render canvas/SVG (bar + ring).
+- Visualizer: **generatif bawaan** (canvas + FNV hash path → pola per lagu, denyut ~114 BPM) — tanpa decode/FFT; panel di player bar + **mini window** auto-buka saat minimize (see Amendemen M3 slice 4).
 - Lirik: embedded USLT / Vorbis `LYRICS` / `.lrc` samping lagu; highlight sinkron.
 - Kinerja: virtual list (hand-rolled fixed-row, menghindari dep react-window/peer-dep React 19; M1) utk daftar >500 baris, debounce search, lazy-load cover + cache disk.
 
@@ -150,14 +153,14 @@ playlist_tracks(playlist_id, track_id, position)
 | M0 | Scaffold Tauri + workspace + CI + benchmark baseline | Repo jalan, `npm run tauri dev` |
 | M1 | `core` + `library` + scanner | Lagu muncul, list + search |
 | M2 | `player` libmpv (pump single-thread) + player bar | Play/pause/seek/volume/next/prev + bar |
-| M3 | EQ, ReplayGain, sleep timer, speed, visualizer, lirik | Slice 1 (speed + sleep timer) ✅, Slice 2 (EQ + ReplayGain) ✅, Slice 3 (lirik) ✅, Slice 4 (visualizer) ✅ — **M3 lengkap** |
+| M3 | EQ, ReplayGain, sleep timer, speed, visualizer, lirik | Slice 1 (speed + sleep timer) ✅, Slice 2 (EQ + ReplayGain) ✅, Slice 3 (lirik) ✅, Slice 4 (visualizer generatif + mini window) ✅ — **M3 lengkap**; batch post-M3: shared-WASAPI default, add files/folder, shuffle + reshuffle, nav Albums/Artists/Folders (Amendemen M3 slice 5–8) ✅ |
 | M4 | Playlist + queue + folder browse + tag editor | Manajemen library lengkap |
 | M5 | Casting DLNA → Chromecast + NSIS installer + README GitHub | Rilis v1 |
 
 ## 5. Risiko Kunci
 
 - **Casting**: implementasi UPnP/DLNA (SOAP) dan CASTV2 dari nol di Rust — paling berisiko; dimitigasi dengan memulai DLNA dulu, trait terisolasi.
-- **Visualizer PCM**: tidak ada API resmi tap PCM di libmpv → decode paralel symphonia (CPU ~5%); kebutuhan sinkron timestamp.
+- **Visualizer**: sejak dirombak jadi **generatif** (tanpa tap PCM / decode), risiko teknis decode paralel symphonia hilang — lihat Amendemen M3 slice 4.
 - **DSD**: perilaku tergantung device (native vs PCM fallback) — perlu pengujian perangkat nyata.
 - **WASAPI exclusive**: koneksi bisa "hilang" saat device diputus — perlu listener device.
 

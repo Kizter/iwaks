@@ -50,6 +50,8 @@ export interface PlayerState {
   volume: number;
   mute: boolean;
   repeat: RepeatMode;
+  /** Shuffle on: the queue walks a random permutation of the list. */
+  shuffle: boolean;
   /** Playback-rate multiplier (0.25–4.0). */
   speed: number;
   /** Seconds left on the sleep timer, or `null` when none is armed. */
@@ -75,11 +77,4 @@ export interface LyricsLine {
 export interface Lyrics {
   timed: LyricsLine[];
   plain: string | null;
-}
-
-/** Mirrors iwaks_visualizer::Spectrum (frames indexed [frame][bin], 0..1). */
-export interface Spectrum {
-  fps: number;
-  bins: number;
-  frames: number[][];
 }

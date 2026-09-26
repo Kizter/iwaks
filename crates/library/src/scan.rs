@@ -109,9 +109,53 @@ pub fn scan(
     Ok(report)
 }
 
-/// Normalized path key for DB lookups (case-insensitive on all platforms).
+/// Add or update specific files picked by the user (multi-select dialog).
+/// No recursion, no pruning — each listed file is read & upserted once.
+pub fn scan_files(
+    lib: &mut Library,
+    paths: &[PathBuf],
+    on_progress: &mut dyn FnMut(&ScanProgress),
+) -> Result<ScanProgress, LibraryError> {
+    let mut report = ScanProgress {
+        total_files: paths.len(),
+        ..Default::default()
+    };
+    on_progress(&report);
+
+    for path in paths {
+        let stat = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => {
+                report.errors += 1;
+                continue;
+            }
+        };
+        let modified = modified_secs(&stat);
+        let size = stat.len() as i64;
+
+        match read_metadata(path) {
+            Ok(meta) => {
+                let track = Track::from_metadata(&path.to_string_lossy(), &meta, size, modified);
+                lib.upsert_track(&track)?;
+                report.added += 1;
+            }
+            Err(_) => report.errors += 1,
+        }
+        report.scanned += 1;
+        if report.scanned.is_multiple_of(20) {
+            on_progress(&report);
+        }
+    }
+
+    on_progress(&report);
+    Ok(report)
+}
+
+/// Normalized path key for DB lookups: case-insensitive on all platforms,
+/// and `/`/`\` equivalent — a file picked from a dialog can carry either
+/// separator on Windows, while walking a folder yields the other.
 fn norm(p: &str) -> String {
-    p.to_lowercase()
+    p.to_lowercase().replace('\\', "/")
 }
 
 /// Collect all supported audio files under `root`, recursively.

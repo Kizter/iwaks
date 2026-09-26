@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use iwaks_core::track::{AudioMetadata, Track};
 use iwaks_library::db::Library;
-use iwaks_library::scan::{scan, ScanOptions, ScanProgress};
+use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 
 // ---------- helpers ----------
 
@@ -209,6 +209,40 @@ fn scan_of_another_root_accumulates_and_only_prunes_deleted_files() {
     let third = scan_once(&mut lib, &root_b, true);
     assert_eq!(third.removed, 1);
     assert_eq!(lib.track_count().unwrap(), 4);
+}
+
+// ---------- add individual files ----------
+
+#[test]
+fn scan_files_adds_picked_files_only() {
+    let tmp = TempDir::new("add-files");
+    let root = build_fixture(&tmp);
+    let mut lib = Library::open(":memory:").expect("open");
+
+    let wish = root
+        .join("Album A")
+        .join("Pink Floyd - Wish You Were Here.wav");
+    let report = scan_files(&mut lib, std::slice::from_ref(&wish), &mut |_| {}).expect("add runs");
+    assert_eq!(report.added, 1);
+    assert_eq!(report.total_files, 1);
+    assert_eq!(lib.track_count().unwrap(), 1);
+
+    // Re-adding the same file after a scan collapses into the same row.
+    let scan_report = scan_once(&mut lib, &root, false);
+    assert_eq!(scan_report.skipped, 1, "already in DB, unchanged");
+
+    // Corrupt and non-audio picks are counted as errors, never panics.
+    let bad = scan_files(
+        &mut lib,
+        &[root.join("broken.wav"), root.join("notes.txt")],
+        &mut |_| {},
+    )
+    .expect("bad picks reported");
+    assert_eq!(bad.errors, 2);
+    assert_eq!(bad.added, 0);
+    // The folder scan added Creep alongside Wish, so the DB holds both;
+    // the two bad picks changed nothing.
+    assert_eq!(lib.track_count().unwrap(), 2);
 }
 
 // ---------- search (FTS5) ----------

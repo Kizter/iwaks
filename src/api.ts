@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Spectrum, Track } from "./types";
+import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -13,6 +13,11 @@ export function searchTracks(query: string): Promise<Track[]> {
 
 export function scanFolder(path: string): Promise<void> {
   return invoke<void>("scan_folder", { path });
+}
+
+/** Add individually-picked files (multi-select) to the library. */
+export function addFiles(paths: string[]): Promise<ScanProgress> {
+  return invoke<ScanProgress>("add_files", { paths });
 }
 
 /** Embedded album art as a `data:` URL, or `null` when the file has none. */
@@ -28,6 +33,22 @@ export async function pickFolder(): Promise<string | null> {
     title: "Choose a music folder",
   });
   return typeof picked === "string" ? picked : null;
+}
+
+const AUDIO_EXTENSIONS = [
+  "flac", "wav", "alac", "m4a", "aac", "mp3", "ogg", "opus", "wv", "wavpack",
+  "aiff", "aif", "wma", "dsf", "dff",
+];
+
+/** Native multi-file picker for direct file import; `null` on cancel. */
+export async function pickFiles(): Promise<string[] | null> {
+  const picked = await open({
+    directory: false,
+    multiple: true,
+    title: "Add music files",
+    filters: [{ name: "Audio", extensions: AUDIO_EXTENSIONS }],
+  });
+  return Array.isArray(picked) ? picked : null;
 }
 
 export interface ScanHandlers {
@@ -86,6 +107,16 @@ export function playerSetRepeat(repeat: RepeatMode): Promise<void> {
   return invoke<void>("set_repeat", { repeat });
 }
 
+/** Toggle shuffle on/off (current track stays; remaining order re-randomized). */
+export function playerSetShuffle(shuffle: boolean): Promise<void> {
+  return invoke<void>("set_shuffle", { shuffle });
+}
+
+/** Re-shuffle the remaining tracks (current track stays selected). */
+export function playerReshuffle(): Promise<void> {
+  return invoke<void>("reshuffle_tracks");
+}
+
 export function playerSetSpeed(speed: number): Promise<void> {
   return invoke<void>("set_speed", { speed });
 }
@@ -109,13 +140,9 @@ export function getLyrics(path: string): Promise<Lyrics | null> {
   return invoke<Lyrics | null>("get_lyrics", { path });
 }
 
-/** Spectrum timeline for the visualizer, or `null` when not decodable. */
-export async function getSpectrum(path: string): Promise<Spectrum | null> {
-  try {
-    return await invoke<Spectrum>("get_spectrum", { path });
-  } catch {
-    return null;
-  }
+/** Toggle the always-on-top mini visualizer window (player-bar button). */
+export function toggleMiniVisualizer(): Promise<void> {
+  return invoke<void>("toggle_mini_visualizer");
 }
 
 export function playerStop(): Promise<void> {

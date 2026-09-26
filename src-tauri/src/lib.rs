@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use iwaks_core::track::Track;
 use iwaks_library::db::Library;
-use iwaks_library::scan::{scan, ScanOptions, ScanProgress};
+use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
-use iwaks_visualizer::{Spectrum, SpectrumCache};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -17,7 +16,6 @@ pub struct AppState {
     db_path: PathBuf,
     scanning: Arc<AtomicBool>,
     player: Arc<Mutex<Option<Arc<Player>>>>,
-    spectrum: SpectrumCache,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -79,33 +77,6 @@ fn get_lyrics(path: String) -> Option<iwaks_tags::lyrics::Lyrics> {
         .flatten()
 }
 
-/// Spectrum timeline for the visualizer. `Err` when the file can't be decoded
-/// (unsupported format — Opus/WavPack/WMA/DSD have no symphonia decoder).
-/// Decoding runs on a blocking worker thread; `SpectrumCache` makes re-opening
-/// the same track instant. (Async commands borrowing state must return
-/// `Result`.)
-#[tauri::command]
-async fn get_spectrum(state: State<'_, AppState>, path: String) -> Result<Spectrum, String> {
-    let p = PathBuf::from(&path);
-    if let Some(cached) = state.spectrum.get(&p) {
-        return Ok(cached);
-    }
-    let task = p.clone();
-    let decoded = tauri::async_runtime::spawn_blocking(move || {
-        iwaks_visualizer::analyze(
-            &task,
-            iwaks_visualizer::DEFAULT_FPS,
-            iwaks_visualizer::DEFAULT_BINS,
-        )
-        .ok()
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .ok_or_else(|| "No spectrum for this track".to_string())?;
-    state.spectrum.put(&p, decoded.clone());
-    Ok(decoded)
-}
-
 /// Kick off a background incremental scan of `path`. Emits `scan-started`,
 /// `scan-progress` (with `finished: false`), then a final `scan-progress`
 /// with `finished: true` or a `scan-error` event.
@@ -156,6 +127,16 @@ fn scan_folder(app: AppHandle, path: String, state: State<'_, AppState>) -> Resu
         }
     });
     Ok(())
+}
+
+/// Add individually-picked music files (multi-select dialog) to the library.
+/// Sync — the picker returns a handful of files, so this is fast enough to
+/// run inline and the frontend refreshes its list when it resolves.
+#[tauri::command]
+fn add_files(paths: Vec<String>, state: State<'_, AppState>) -> Result<ScanProgress, String> {
+    let mut lib = open_lib(&state)?;
+    let files: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    scan_files(&mut lib, &files, &mut |_| {}).map_err(|e| e.to_string())
 }
 
 // ---------- playback (libmpv via iwaks-player) ----------
@@ -267,6 +248,24 @@ fn set_repeat(repeat: RepeatMode, state: State<'_, AppState>) -> Result<(), Stri
     Ok(())
 }
 
+/// Toggle shuffle on/off (current track stays; remaining order re-randomized).
+#[tauri::command]
+fn set_shuffle(shuffle: bool, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .set_shuffle(shuffle);
+    Ok(())
+}
+
+/// Re-shuffle the remaining tracks (current track stays selected).
+#[tauri::command]
+fn reshuffle_tracks(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .reshuffle();
+    Ok(())
+}
+
 #[tauri::command]
 fn stop_playback(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
@@ -286,6 +285,55 @@ impl Drop for ScanGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
+}
+
+/// Label of the always-on-top mini visualizer window.
+const MINI_LABEL: &str = "mini";
+
+/// Create the mini visualizer window if it doesn't exist yet. It loads the
+/// same frontend with `#mini` in the URL; `App` switches to the mini layout.
+fn open_mini_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window(MINI_LABEL).is_some() {
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        app,
+        MINI_LABEL,
+        tauri::WebviewUrl::App("index.html#mini".into()),
+    )
+    .title("Iwaks Visualizer")
+    .inner_size(480.0, 320.0)
+    .min_inner_size(320.0, 213.0)
+    .resizable(true)
+    .maximizable(false)
+    .minimizable(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .decorations(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Open the mini visualizer when the main window is minimized, close it when
+/// the main window comes back.
+fn sync_mini(app: &AppHandle, minimized: bool) {
+    if minimized {
+        let _ = open_mini_window(app);
+    } else if let Some(mini) = app.get_webview_window(MINI_LABEL) {
+        let _ = mini.close();
+    }
+}
+
+/// Manual toggle from the player bar (independent of the minimized state).
+#[tauri::command]
+fn toggle_mini_visualizer(app: AppHandle) -> Result<(), String> {
+    if let Some(mini) = app.get_webview_window(MINI_LABEL) {
+        let _ = mini.close();
+    } else {
+        open_mini_window(&app)?;
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -316,14 +364,36 @@ pub fn run() {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
                 player: Arc::new(Mutex::new(player)),
-                spectrum: SpectrumCache::default(),
             });
+
+            // Auto-open the mini visualizer while the main window is minimized,
+            // close it on restore, and never let it outlive the main window.
+            let main_handle = app.handle().clone();
+            if let Some(main) = app.get_webview_window("main") {
+                main.on_window_event(move |event| match event {
+                    tauri::WindowEvent::Resized(_) => {
+                        let minimized = main_handle
+                            .get_webview_window("main")
+                            .map(|w| w.is_minimized().unwrap_or(false))
+                            .unwrap_or(false);
+                        sync_mini(&main_handle, minimized);
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        if let Some(mini) = main_handle.get_webview_window(MINI_LABEL) {
+                            let _ = mini.close();
+                        }
+                        main_handle.exit(0);
+                    }
+                    _ => {}
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_tracks,
             search_tracks,
             scan_folder,
+            add_files,
             read_cover,
             play_tracks,
             toggle_play,
@@ -334,6 +404,8 @@ pub fn run() {
             set_volume,
             toggle_mute,
             set_repeat,
+            set_shuffle,
+            reshuffle_tracks,
             set_speed,
             set_sleep_timer,
             set_eq,
@@ -341,7 +413,7 @@ pub fn run() {
             stop_playback,
             get_player_state,
             get_lyrics,
-            get_spectrum
+            toggle_mini_visualizer
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -26,7 +26,7 @@
 //! Tests run headless (`ao=null`); when no libmpv DLL is present they skip.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -46,21 +46,16 @@ const WAIT_SLICE: f64 = 0.1;
 const TICK_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Playback behaviour knobs applied at startup.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Null audio output — headless (tests/CI, no device required).
     pub ao_null: bool,
-    /// WASAPI exclusive mode (bit-perfect); only meaningful with a real AO.
+    /// WASAPI exclusive mode (bit-perfect). **Default off**: exclusive mode
+    /// silences every other app on the machine sample-accurately for the
+    /// whole session, which surprised users ("Discord/YouTube go quiet while
+    /// Iwaks runs"). Shared mode keeps other apps audible and is the default.
+    /// Deviation from design §4.2 "bit-perfect".
     pub audio_exclusive: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            ao_null: false,
-            audio_exclusive: true,
-        }
-    }
 }
 
 /// Full playback state pushed to the frontend on `player-state`.
@@ -78,6 +73,8 @@ pub struct PlayerState {
     pub volume: i64,
     pub mute: bool,
     pub repeat: RepeatMode,
+    /// Shuffle on: the queue walks a permutation of the list.
+    pub shuffle: bool,
     /// Playback-rate multiplier (mpv `speed` property); clamped to 0.25–4.0.
     pub speed: f64,
     /// Seconds left on the sleep timer; `None` when no timer is armed.
@@ -182,6 +179,8 @@ enum Cmd {
     SetSpeed(f64),
     SetEq { preamp: f64, gains: Vec<f64> },
     SetReplayGain(ReplayGainMode),
+    SetShuffle(bool),
+    Reshuffle,
     Stop,
     SleepElapsed,
     Refresh,
@@ -205,6 +204,9 @@ pub struct Player {
     eq: Mutex<EqSettings>,
     /// Last-requested ReplayGain mode; fallback when the property read fails.
     replaygain: Mutex<ReplayGainMode>,
+    /// Monotonic seed source for shuffle permutations (SplitMix64 steps so
+    /// consecutive seeds are unrelated).
+    shuffle_seed: AtomicU64,
     thread: Mutex<Option<JoinHandle<()>>>,
     stopped: AtomicBool,
     shut_down: AtomicBool,
@@ -228,6 +230,7 @@ impl Player {
                 volume: 80,
                 mute: false,
                 repeat: RepeatMode::Off,
+                shuffle: false,
                 speed: 1.0,
                 sleep_remaining: None,
                 eq_preamp: 0.0,
@@ -241,6 +244,7 @@ impl Player {
             sleep_deadline: Mutex::new(None),
             eq: Mutex::new(EqSettings::default()),
             replaygain: Mutex::new(ReplayGainMode::Track),
+            shuffle_seed: AtomicU64::new(0xDEADBEEF),
             thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
             shut_down: AtomicBool::new(false),
@@ -318,10 +322,19 @@ impl Player {
             return;
         }
         let index = index.min(tracks.len() - 1);
-        let repeat = self.queue.lock().unwrap().repeat;
+        let (repeat, shuffle) = {
+            let q = self.queue.lock().unwrap();
+            (q.repeat, q.shuffle)
+        };
         let len = tracks.len();
+        let mut queue = Queue::new(len).with_repeat(repeat);
+        if shuffle {
+            // Keep shuffle on across list swaps; fresh permutation, but the
+            // requested track still starts playing.
+            queue = queue.with_shuffle(self.next_shuffle_seed());
+        }
         *self.tracks.lock().unwrap() = tracks;
-        *self.queue.lock().unwrap() = Queue::new(len).with_repeat(repeat).start(index);
+        *self.queue.lock().unwrap() = queue.start(index);
         self.push(Cmd::Load(index));
     }
 
@@ -402,6 +415,24 @@ impl Player {
         self.push(Cmd::Refresh);
     }
 
+    /// Toggle shuffle on/off (`on`: randomize the remaining order, keep the
+    /// current track; `off`: return to the linear list order).
+    pub fn set_shuffle(&self, shuffle: bool) {
+        self.push(Cmd::SetShuffle(shuffle));
+    }
+
+    /// Shuffle the remaining tracks again (keeps the current track).
+    pub fn reshuffle(&self) {
+        self.push(Cmd::Reshuffle);
+    }
+
+    /// Next unique shuffle seed: monotonic SplitMix64 steps, so consecutive
+    /// calls never reuse a permutation.
+    fn next_shuffle_seed(&self) -> u64 {
+        self.shuffle_seed
+            .fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
+    }
+
     /// Stop playback and mark the queue as ended.
     pub fn stop(&self) {
         self.push(Cmd::Stop);
@@ -435,6 +466,31 @@ impl Player {
             return; // shutting down — ignore new work
         }
         queue.push_back(cmd);
+    }
+
+    /// Enable/disable shuffle without touching playback (pump thread only).
+    /// Next/prev/auto-advance all read the new permutation via the queue.
+    fn apply_shuffle(&self, on: bool) {
+        let seed = self.next_shuffle_seed();
+        let next = {
+            let q = self.queue.lock().unwrap();
+            if on {
+                q.with_shuffle(seed)
+            } else {
+                q.with_shuffle_off()
+            }
+        };
+        *self.queue.lock().unwrap() = next;
+        self.emit();
+    }
+
+    /// Re-shuffle the remaining tracks, keeping the current one pinned
+    /// (pump thread only).
+    fn apply_reshuffle(&self) {
+        let seed = self.next_shuffle_seed();
+        let next = self.queue.lock().unwrap().reshuffle(seed);
+        *self.queue.lock().unwrap() = next;
+        self.emit();
     }
 
     // ---- pump side (only the pump thread runs these) ----
@@ -540,6 +596,8 @@ impl Player {
                 let _ = api.command(&["set", "replaygain", mode.as_mpv()]);
                 self.emit();
             }
+            Cmd::SetShuffle(on) => self.apply_shuffle(on),
+            Cmd::Reshuffle => self.apply_reshuffle(),
             Cmd::Stop => {
                 self.stopped.store(true, Ordering::SeqCst);
                 let _ = self.api().command(&["stop"]);
@@ -722,6 +780,7 @@ impl Player {
             volume,
             mute,
             repeat: queue.repeat,
+            shuffle: queue.shuffle,
             speed,
             sleep_remaining,
             eq_preamp,
@@ -826,6 +885,84 @@ mod tests {
             sink,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn defaults_use_shared_wasapi_audio() {
+        // Exclusive mode silences other apps for the whole session; shared is
+        // the default so Discord/YouTube stay audible while Iwaks plays.
+        assert!(
+            !Options::default().audio_exclusive,
+            "shared mode by default"
+        );
+        assert!(!Options::default().ao_null, "real audio by default");
+    }
+
+    #[test]
+    fn shuffle_roundtrip_pins_current_and_persists() {
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("shuffle");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        let c = dir.join("c.wav");
+        for p in [&a, &b, &c] {
+            write_wav(p, 2.0);
+        }
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 2.0),
+            track(b.to_str().unwrap(), "B", 2.0),
+            track(c.to_str().unwrap(), "C", 2.0),
+        ];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("starts playing A");
+        assert!(!player.snapshot().shuffle);
+
+        player.set_shuffle(true);
+        let s = wait_for(&player, Duration::from_secs(3), |s| s.shuffle).expect("shuffle enabled");
+        assert_eq!(
+            s.current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "current track stays selected when shuffle turns on"
+        );
+
+        // Reshuffle keeps the current track playing.
+        player.reshuffle();
+        wait_for(&player, Duration::from_secs(3), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("reshuffle keeps current");
+
+        // Playing a new list keeps shuffle on (fresh permutation), and the
+        // requested track still starts.
+        player.play_tracks(
+            vec![
+                track(b.to_str().unwrap(), "B", 2.0),
+                track(c.to_str().unwrap(), "C", 2.0),
+                track(a.to_str().unwrap(), "A", 2.0),
+            ],
+            1,
+        );
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.shuffle && s.current.as_ref().map(|t| t.title.as_str()) == Some("C")
+        })
+        .expect("shuffle persists and requested track plays");
+
+        player.set_shuffle(false);
+        let s =
+            wait_for(&player, Duration::from_secs(3), |s| !s.shuffle).expect("shuffle disabled");
+        assert_eq!(
+            s.current.as_ref().map(|t| t.title.as_str()),
+            Some("C"),
+            "current track stays when shuffle turns off"
+        );
+        player.shutdown();
     }
 
     #[test]

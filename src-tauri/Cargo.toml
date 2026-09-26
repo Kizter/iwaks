@@ -24,7 +24,6 @@ iwaks-core = { path = "../crates/core" }
 iwaks-library = { path = "../crates/library" }
 iwaks-player = { path = "../crates/player" }
 iwaks-tags.workspace = true
-iwaks-visualizer.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64.workspace = true
