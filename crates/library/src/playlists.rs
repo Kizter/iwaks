@@ -113,8 +113,8 @@ impl Library {
         Ok(Some(rows.collect::<rusqlite::Result<Vec<_>>>()?))
     }
 
-    /// Append `track_id` to `playlist_id` (no duplicates). Errors when the
-    /// playlist doesn't exist.
+    /// Append one track entry (no duplicates). Errors when the playlist
+    /// doesn't exist.
     pub fn add_track_to_playlist(
         &mut self,
         playlist_id: i64,
@@ -130,6 +130,38 @@ impl Library {
             rusqlite::params![playlist_id, track_id],
         )?;
         Ok(())
+    }
+
+    /// Append every `track_id` in order (no duplicates) in **one transaction**
+    /// — used when saving the session queue as a playlist. Returns how many
+    /// entries were actually inserted. Errors when the playlist doesn't
+    /// exist; a failing entry (e.g. unknown track id → FK) rolls the whole
+    /// batch back, so nothing half-applies.
+    pub fn add_tracks_to_playlist(
+        &mut self,
+        playlist_id: i64,
+        track_ids: &[i64],
+    ) -> Result<usize, LibraryError> {
+        if !self.playlist_exists(playlist_id)? {
+            return Err(LibraryError::NotFound(format!("playlist {playlist_id}")));
+        }
+        if track_ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn_mut().unchecked_transaction()?;
+        let mut inserted = 0usize;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+                 VALUES (?1, ?2, (SELECT coalesce(max(position), -1) + 1
+                                  FROM playlist_tracks WHERE playlist_id = ?1))",
+            )?;
+            for track_id in track_ids {
+                inserted += stmt.execute(rusqlite::params![playlist_id, track_id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(inserted)
     }
 
     /// Remove one track entry from a playlist (idempotent).

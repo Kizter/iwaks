@@ -285,3 +285,69 @@ fn migration_v1_to_v2_preserves_tracks_and_adds_playlists() {
         .unwrap();
     assert_eq!(version, 2);
 }
+
+// ---------- bulk add (save-as-playlist, M4 slice 2) ----------
+
+#[test]
+fn add_tracks_bulk_appends_in_order_and_dedupes() {
+    let mut lib = Library::open(":memory:").expect("open");
+    let a = insert_track(&mut lib, "C:/music/a.flac", "A");
+    let b = insert_track(&mut lib, "C:/music/b.flac", "B");
+    let c = insert_track(&mut lib, "C:/music/c.flac", "C");
+    let pid = lib.create_playlist("P").unwrap();
+
+    let inserted = lib
+        .add_tracks_to_playlist(pid, &[a, b, c, b])
+        .expect("bulk add");
+    assert_eq!(inserted, 3, "duplicates are ignored, not re-added");
+
+    let titles: Vec<String> = lib
+        .get_playlist_tracks(pid)
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|t| t.title.clone())
+        .collect();
+    assert_eq!(titles, ["A", "B", "C"], "insertion order preserved");
+    assert_eq!(lib.get_playlist(pid).unwrap().unwrap().track_count, 3);
+
+    // A second bulk call appends after the existing entries.
+    lib.add_tracks_to_playlist(pid, &[a, b]).unwrap();
+    let titles: Vec<String> = lib
+        .get_playlist_tracks(pid)
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|t| t.title.clone())
+        .collect();
+    assert_eq!(titles, ["A", "B", "C"], "re-adds are deduped in place");
+}
+
+#[test]
+fn add_tracks_bulk_empty_list_is_a_noop() {
+    let mut lib = Library::open(":memory:").expect("open");
+    let pid = lib.create_playlist("P").unwrap();
+    assert_eq!(lib.add_tracks_to_playlist(pid, &[]).unwrap(), 0);
+    assert!(lib.get_playlist_tracks(pid).unwrap().unwrap().is_empty());
+    assert_eq!(lib.get_playlist(pid).unwrap().unwrap().track_count, 0);
+}
+
+#[test]
+fn add_tracks_bulk_missing_playlist_is_not_found() {
+    let mut lib = Library::open(":memory:").expect("open");
+    insert_track(&mut lib, "C:/music/a.flac", "A");
+    let err = lib.add_tracks_to_playlist(999, &[1]).unwrap_err();
+    assert_eq!(err.to_string(), "not found: playlist 999");
+}
+
+#[test]
+fn add_tracks_bulk_rolls_back_on_failure() {
+    let mut lib = Library::open(":memory:").expect("open");
+    let a = insert_track(&mut lib, "C:/music/a.flac", "A");
+    let pid = lib.create_playlist("P").unwrap();
+
+    // A nonexistent track id violates the FK — the whole batch must roll back,
+    // so the valid entry from the same call doesn't linger half-applied.
+    assert!(lib.add_tracks_to_playlist(pid, &[a, 9999]).is_err());
+    assert!(lib.get_playlist_tracks(pid).unwrap().unwrap().is_empty());
+}

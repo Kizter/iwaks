@@ -444,6 +444,45 @@ fn export_m3u(playlist_id: i64, path: String, state: State<'_, AppState>) -> Res
     std::fs::write(std::path::Path::new(&path), content).map_err(|e| e.to_string())
 }
 
+// ---------- session queue (M4 slice 2) ----------
+
+/// Tracks of the current session queue in play order (the shuffle
+/// permutation when enabled) — for the Queue view.
+#[tauri::command]
+fn get_queue(state: State<'_, AppState>) -> Result<Vec<Track>, String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())
+        .map(|p| p.queue_tracks())
+}
+
+/// Move the queue track at position `from` to `to` (current track follows;
+/// playback is untouched).
+#[tauri::command]
+fn reorder_queue(from: usize, to: usize, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .reorder_queue(from, to);
+    Ok(())
+}
+
+/// Save the current session queue as a playlist (trimmed non-empty name).
+/// Returns the new playlist id.
+#[tauri::command]
+fn save_queue_as_playlist(name: String, state: State<'_, AppState>) -> Result<i64, String> {
+    let tracks = player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .queue_tracks();
+    if tracks.is_empty() {
+        return Err("Queue is empty — nothing to save".to_string());
+    }
+    let mut lib = open_lib(&state)?;
+    let playlist_id = lib.create_playlist(&name).map_err(|e| e.to_string())?;
+    let track_ids: Vec<i64> = tracks.iter().map(|t| t.id).collect();
+    lib.add_tracks_to_playlist(playlist_id, &track_ids)
+        .map_err(|e| e.to_string())?;
+    Ok(playlist_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -529,7 +568,10 @@ pub fn run() {
             remove_from_playlist,
             reorder_playlist,
             import_m3u,
-            export_m3u
+            export_m3u,
+            get_queue,
+            reorder_queue,
+            save_queue_as_playlist
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -154,6 +154,23 @@ export function getPlayerState(): Promise<PlayerState | null> {
   return invoke<PlayerState | null>("get_player_state");
 }
 
+// ---------- session queue (M4 slice 2) ----------
+
+/** Tracks of the current session queue in play order (shuffle permutation when on). */
+export function getQueue(): Promise<Track[]> {
+  return invoke<Track[]>("get_queue");
+}
+
+/** Move the queue track at position `from` to `to` (current track follows). */
+export function reorderQueue(from: number, to: number): Promise<void> {
+  return invoke<void>("reorder_queue", { from, to });
+}
+
+/** Save the current queue as a playlist; resolves to its id. */
+export function saveQueueAsPlaylist(name: string): Promise<number> {
+  return invoke<number>("save_queue_as_playlist", { name });
+}
+
 // ---------- playlists (M4 slice 1) ----------
 
 export function listPlaylists(): Promise<Playlist[]> {

@@ -159,6 +159,48 @@ impl Queue {
     fn relocate_to(&mut self, track: Option<usize>) {
         self.index = track.and_then(|t| self.order.iter().position(|&x| x == t));
     }
+
+    /// Track indices in play order (position → track). A clone of the private
+    /// `order` permutation so the player can map tracks without exposing it.
+    pub fn ordered_indices(&self) -> Vec<usize> {
+        self.order.clone()
+    }
+
+    // ---- manual reorder (session queue, M4 slice 2) ----
+
+    /// Move the track at queue position `from` to position `to` (`to` clamped
+    /// to the last slot). The currently playing track follows its new slot:
+    /// `index` is re-pointed so `current()` never changes — playback is
+    /// untouched, only the upcoming order is edited. Out-of-range `from`
+    /// (or an empty queue) returns the queue unchanged.
+    pub fn reorder(&self, from: usize, to: usize) -> Self {
+        if self.len == 0 || from >= self.len || from == to {
+            return self.clone();
+        }
+        let to = to.min(self.len - 1);
+        let mut order = self.order.clone();
+        let moved = order.remove(from);
+        order.insert(to, moved);
+        // `index` is a *position*, so it must track the element that was the
+        // current track. Slots between `from` and `to` shift by one in the
+        // direction of the move.
+        let index = self.index.map(|pos| {
+            if pos == from {
+                to
+            } else if from < pos && pos <= to {
+                pos - 1
+            } else if to <= pos && pos < from {
+                pos + 1
+            } else {
+                pos
+            }
+        });
+        Self {
+            order,
+            index,
+            ..self.clone()
+        }
+    }
 }
 
 /// Deterministic Fisher–Yates shuffle of `0..n` from a SplitMix64 generator.
@@ -396,5 +438,103 @@ mod tests {
         };
         assert_eq!(at_last.after_end(), Some(first), "after_end wraps");
         assert_eq!(at_last.user_next(), Some(first), "user_next wraps");
+    }
+
+    // ---------- manual reorder (session queue) ----------
+
+    #[test]
+    fn ordered_indices_matches_play_order() {
+        let q = Queue::new(4).start(2).with_shuffle(11);
+        assert_eq!(q.ordered_indices(), q.order);
+        assert_eq!(Queue::new(0).ordered_indices(), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn reorder_moves_track_and_keeps_current_following() {
+        // Move a later track up to position 1; the current track (pos 1)
+        // shifts down and keeps playing.
+        let q = Queue::new(5).start(1);
+        let after = q.reorder(3, 1);
+        assert_eq!(after.order, vec![0, 3, 1, 2, 4]);
+        assert_eq!(after.index, Some(2), "current shifts down one slot");
+        assert_eq!(after.current(), Some(1), "current track never changes");
+    }
+
+    #[test]
+    fn reorder_moving_current_track_updates_index_to_target() {
+        let q = Queue::new(4).start(2);
+        let after = q.reorder(2, 0);
+        assert_eq!(after.order, vec![2, 0, 1, 3]);
+        assert_eq!(after.index, Some(0), "current lands at its new slot");
+        assert_eq!(after.current(), Some(2));
+    }
+
+    #[test]
+    fn reorder_moving_down_shifts_passed_tracks_up() {
+        // Current track dragged to the tail.
+        let q = Queue::new(4).start(1);
+        let after = q.reorder(1, 3);
+        assert_eq!(after.order, vec![0, 2, 3, 1]);
+        assert_eq!(after.index, Some(3), "current follows to the end");
+        assert_eq!(after.current(), Some(1));
+
+        // A non-current element moved down between the current and its target.
+        let q2 = Queue::new(4).start(2);
+        let after2 = q2.reorder(0, 2);
+        assert_eq!(after2.order, vec![1, 2, 0, 3]);
+        assert_eq!(after2.index, Some(1), "passed track shifts up one");
+        assert_eq!(after2.current(), Some(2));
+    }
+
+    #[test]
+    fn reorder_clamps_to_and_ignores_invalid_from() {
+        let q = Queue::new(3).start(0);
+        // Out-of-range `from` leaves the queue untouched.
+        let same = q.reorder(9, 1);
+        assert_eq!(same.order, q.order);
+        assert_eq!(same.index, q.index);
+
+        // `to` beyond the end clamps to the last slot.
+        let clamped = q.reorder(0, 99);
+        assert_eq!(clamped.order, vec![1, 2, 0]);
+        assert_eq!(clamped.current(), Some(0), "current follows to the tail");
+
+        // No-op move keeps everything identical.
+        let noop = q.reorder(1, 1);
+        assert_eq!(noop.order, q.order);
+        assert_eq!(noop.index, q.index);
+    }
+
+    #[test]
+    fn reorder_empty_or_single_queue_is_a_noop() {
+        let empty = Queue::new(0);
+        assert_eq!(empty.reorder(0, 1).order, Vec::<usize>::new());
+        assert_eq!(empty.reorder(0, 1).index, None);
+
+        let single = Queue::new(1).start(0);
+        assert_eq!(single.reorder(0, 0).order, vec![0]);
+        assert_eq!(single.reorder(0, 0).index, Some(0));
+        assert_eq!(single.reorder(0, 5).current(), Some(0));
+    }
+
+    #[test]
+    fn reorder_keeps_shuffle_and_permutation_consistent() {
+        let q = Queue::new(5).start(1).with_shuffle(42);
+        let shuffled = q.order.clone();
+        assert_eq!(q.index, Some(0), "current pinned to front under shuffle");
+
+        let after = q.reorder(2, 4);
+        assert!(after.shuffle, "shuffle flag survives a manual move");
+        assert_eq!(after.current(), Some(1), "shuffled current keeps playing");
+        assert_eq!(after.index, Some(0), "current stays pinned at the front");
+
+        let mut sorted = after.order.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..5).collect::<Vec<_>>(), "still a permutation");
+
+        let mut expected = shuffled.clone();
+        let moved = expected.remove(2);
+        expected.insert(4, moved);
+        assert_eq!(after.order, expected, "only the moved slot changes");
     }
 }

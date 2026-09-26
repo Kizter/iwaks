@@ -426,6 +426,26 @@ impl Player {
         self.push(Cmd::Reshuffle);
     }
 
+    /// Ordered tracks in the current session queue (play order — the shuffle
+    /// permutation when enabled). Read for the Queue view; never touches mpv.
+    pub fn queue_tracks(&self) -> Vec<Track> {
+        let indices = self.queue.lock().unwrap().ordered_indices();
+        let tracks = self.tracks.lock().unwrap();
+        indices
+            .iter()
+            .filter_map(|&i| tracks.get(i).cloned())
+            .collect()
+    }
+
+    /// Move the track at queue position `from` to `to`. The currently playing
+    /// track follows its new slot, so playback is untouched — only the
+    /// upcoming order changes (touch-queue only, no mpv calls).
+    pub fn reorder_queue(&self, from: usize, to: usize) {
+        let next = self.queue.lock().unwrap().reorder(from, to);
+        *self.queue.lock().unwrap() = next;
+        self.push(Cmd::Refresh);
+    }
+
     /// Next unique shuffle seed: monotonic SplitMix64 steps, so consecutive
     /// calls never reuse a permutation.
     fn next_shuffle_seed(&self) -> u64 {
@@ -1276,6 +1296,102 @@ mod tests {
             !s.paused && s.position > base + 0.25
         })
         .expect("playback intact after clearing the chain");
+        player.shutdown();
+    }
+
+    // ---- session queue: order read + manual reorder (M4 slice 2) ----
+
+    #[test]
+    fn reorder_queue_changes_upcoming_order_without_touching_playback() {
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("reorder");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        let c = dir.join("c.wav");
+        for p in [&a, &b, &c] {
+            write_wav(p, 2.0);
+        }
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 2.0),
+            track(b.to_str().unwrap(), "B", 2.0),
+            track(c.to_str().unwrap(), "C", 2.0),
+        ];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("starts playing A");
+
+        // Move C (queue position 2) up to position 1 → order A, C, B.
+        player.reorder_queue(2, 1);
+        let titles: Vec<String> = player
+            .queue_tracks()
+            .iter()
+            .map(|t| t.title.clone())
+            .collect();
+        assert_eq!(titles, ["A", "C", "B"]);
+        assert_eq!(
+            player.snapshot().current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "reorder never changes the playing track"
+        );
+
+        // The queue walks the new order: next goes to C, not B.
+        player.next();
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("C")
+        })
+        .expect("next follows the reordered queue");
+        player.shutdown();
+    }
+
+    #[test]
+    fn queue_tracks_reflects_reorder_with_shuffle_on() {
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("reorder-shuffle");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        let c = dir.join("c.wav");
+        let d = dir.join("d.wav");
+        for p in [&a, &b, &c, &d] {
+            write_wav(p, 2.0);
+        }
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 2.0),
+            track(b.to_str().unwrap(), "B", 2.0),
+            track(c.to_str().unwrap(), "C", 2.0),
+            track(d.to_str().unwrap(), "D", 2.0),
+        ];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        player.set_shuffle(true);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.shuffle && s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("shuffle on, current pinned to the front");
+
+        let before = player.queue_tracks();
+        assert_eq!(before.len(), 4);
+
+        // Move the element at position 3 to position 1: [b0, b3, b1, b2].
+        player.reorder_queue(3, 1);
+        let after = player.queue_tracks();
+        assert_eq!(after.len(), 4);
+        assert_eq!(after[1].path, before[3].path, "moved element lands at 1");
+        assert_eq!(after[2].path, before[1].path, "shifted up one");
+        assert_eq!(after[3].path, before[2].path, "shifted up one");
+        assert_eq!(
+            player.snapshot().current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "current stays pinned at the front"
+        );
         player.shutdown();
     }
 }

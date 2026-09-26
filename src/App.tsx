@@ -7,6 +7,7 @@ import {
   exportM3u,
   getPlayerState,
   getPlaylistTracks,
+  getQueue,
   getTracks,
   importM3u,
   listenPlayer,
@@ -20,6 +21,8 @@ import {
   playerTogglePlay,
   removeFromPlaylist,
   renamePlaylist,
+  reorderQueue,
+  saveQueueAsPlaylist,
   scanFolder,
   searchTracks,
 } from "./api";
@@ -41,6 +44,7 @@ type View =
   | { kind: "folders" }
   | { kind: "playlists" }
   | { kind: "playlist"; id: number }
+  | { kind: "queue" }
   | { kind: "album"; key: string }
   | { kind: "artist"; key: string }
   | { kind: "folder"; key: string };
@@ -289,6 +293,139 @@ function TrackList({
   );
 }
 
+/** Six-dot grip shown on queue rows (drag to reorder). */
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <g fill="currentColor">
+        <circle cx="5" cy="4" r="1.2" />
+        <circle cx="11" cy="4" r="1.2" />
+        <circle cx="5" cy="8" r="1.2" />
+        <circle cx="11" cy="8" r="1.2" />
+        <circle cx="5" cy="12" r="1.2" />
+        <circle cx="11" cy="12" r="1.2" />
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * Session queue (M4 slice 2): play-order rows with drag-handle reorder.
+ * Same fixed-row virtualization as `TrackList`; HTML5 drag & drop maps to
+ * `reorder_queue(from, to)` — the dragged track lands at the hovered slot.
+ */
+function QueueList({
+  tracks,
+  playingPath,
+  onReorder,
+}: {
+  tracks: Track[];
+  playingPath: string | null;
+  onReorder: (from: number, to: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(0);
+  const dragFrom = useRef<number | null>(null);
+  const [dragSrc, setDragSrc] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setViewH(el.clientHeight));
+    ro.observe(el);
+    setViewH(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+
+  const onScroll = useCallback(() => {
+    setScrollTop(scrollRef.current?.scrollTop ?? 0);
+  }, []);
+
+  const clearDrag = useCallback(() => {
+    dragFrom.current = null;
+    setDragSrc(null);
+    setDragOver(null);
+  }, []);
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 8);
+  const end = Math.min(tracks.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + 8);
+  const rows: ReactNode[] = [];
+  for (let i = start; i < end; i++) {
+    const t = tracks[i];
+    const isPlaying = t.path === playingPath;
+    rows.push(
+      <li
+        key={t.id === 0 ? `${t.path}-${i}` : t.id}
+        className={`track-row queue-row${isPlaying ? " is-playing" : ""}${dragSrc === i ? " queue-source" : ""}${dragOver === i ? " drag-over" : ""}`}
+        style={{ transform: `translateY(${i * ROW_HEIGHT}px)` }}
+        title={t.path}
+        draggable
+        onDragStart={(e) => {
+          dragFrom.current = i;
+          setDragSrc(i);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDragOver(i);
+        }}
+        onDragLeave={() => setDragOver((cur) => (cur === i ? null : cur))}
+        onDrop={(e) => {
+          e.preventDefault();
+          const from = dragFrom.current;
+          if (from !== null && from !== i) onReorder(from, i);
+          clearDrag();
+        }}
+        onDragEnd={clearDrag}
+      >
+        <span className="queue-pos" aria-hidden="true">
+          {i + 1}
+        </span>
+        <Cover track={t} />
+        <span className="track-main">
+          <span className="track-title">{t.title}</span>
+          <span className="track-sub">
+            {t.artist ?? "Unknown artist"}
+            {t.album ? ` · ${t.album}` : ""}
+          </span>
+        </span>
+        <span className="track-meta">
+          {isPlaying && (
+            <span className="queue-now" role="status">
+              <span className="queue-now-dot" aria-hidden="true" /> Now playing
+            </span>
+          )}
+          <span className="track-badge">{formatBadge(t.format)}</span>
+          <span className="track-dur">{formatDuration(t.durationMs)}</span>
+          <span className="queue-handle" title="Drag to reorder" aria-hidden="true">
+            <GripIcon />
+          </span>
+        </span>
+      </li>,
+    );
+  }
+
+  return (
+    <div
+      className="track-scroll"
+      ref={scrollRef}
+      onScroll={onScroll}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        clearDrag();
+      }}
+    >
+      <ul className="track-inner" style={{ height: tracks.length * ROW_HEIGHT }}>
+        {rows}
+      </ul>
+    </div>
+  );
+}
+
 function Skeleton({ count }: { count: number }) {
   return (
     <div className="skeleton" aria-hidden="true">
@@ -300,7 +437,7 @@ function Skeleton({ count }: { count: number }) {
 }
 
 const NAV_ITEMS: Array<{
-  id: "songs" | "albums" | "artists" | "folders" | "playlists";
+  id: "songs" | "albums" | "artists" | "folders" | "playlists" | "queue";
   label: string;
 }> = [
   { id: "songs", label: "Songs" },
@@ -308,6 +445,7 @@ const NAV_ITEMS: Array<{
   { id: "artists", label: "Artists" },
   { id: "folders", label: "Folders" },
   { id: "playlists", label: "Playlists" },
+  { id: "queue", label: "Queue" },
 ];
 
 /** Which sidebar entries the current view belongs under (grid or its detail). */
@@ -316,6 +454,7 @@ function homeOf(view: View): View["kind"] {
   if (view.kind === "artists" || view.kind === "artist") return "artists";
   if (view.kind === "folders" || view.kind === "folder") return "folders";
   if (view.kind === "playlists" || view.kind === "playlist") return "playlists";
+  if (view.kind === "queue") return "queue";
   return "songs";
 }
 
@@ -419,6 +558,10 @@ function App() {
   const [view, setView] = useState<View>({ kind: "songs" });
   const tracks = useSearch(query, refreshKey);
 
+  // ---- session queue (M4 slice 2) ----
+  const [queue, setQueue] = useState<Track[] | null>(null);
+  const [saveQueueOpen, setSaveQueueOpen] = useState(false);
+
   // ---- playlists (M4 slice 1) ----
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [plDetail, setPlDetail] = useState<{ name: string; tracks: Track[] } | null>(null);
@@ -484,6 +627,27 @@ function App() {
       unlisten?.();
     };
   }, []);
+
+  // Session queue: refetch whenever the playing position, list size, or
+  // shuffle state changes (the queued list itself only changes then).
+  const queueSig = useMemo(
+    () =>
+      playerState
+        ? `${playerState.index ?? "-"}|${playerState.listLen}|${playerState.shuffle}`
+        : "",
+    [playerState],
+  );
+  useEffect(() => {
+    let alive = true;
+    getQueue()
+      .then((q) => {
+        if (alive) setQueue(q);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [queueSig]);
 
   // Space toggles play/pause (never while typing or when a button is focused).
   useEffect(() => {
@@ -673,6 +837,30 @@ function App() {
     [view, refreshPlaylists],
   );
 
+  const onReorderQueue = useCallback(async (from: number, to: number) => {
+    try {
+      await reorderQueue(from, to);
+      setQueue(await getQueue());
+    } catch (e) {
+      setBanner(`Reorder failed — ${String(e)}`);
+    }
+  }, []);
+
+  const onSaveQueue = useCallback(
+    async (name: string) => {
+      try {
+        const id = await saveQueueAsPlaylist(name);
+        setSaveQueueOpen(false);
+        setBanner("Queue saved as playlist");
+        await refreshPlaylists();
+        setView({ kind: "playlist", id });
+      } catch (e) {
+        setBanner(`Couldn't save queue — ${String(e)}`);
+      }
+    },
+    [refreshPlaylists],
+  );
+
   const addTrackToPlaylist = useCallback(
     async (playlistId: number) => {
       const t = addTarget;
@@ -778,6 +966,7 @@ function App() {
   const isGrid = gridKind !== null;
   const isPlaylists = view.kind === "playlists";
   const isPlaylistDetail = view.kind === "playlist";
+  const isQueue = view.kind === "queue";
   const currentPlaylist = isPlaylistDetail
     ? (playlists ?? []).find((p) => p.id === (view as { id: number }).id) ?? null
     : null;
@@ -790,9 +979,11 @@ function App() {
       ? playlists !== null && playlists.length === 0
       : isPlaylistDetail
         ? plDetail !== null && plDetail.tracks.length === 0 && query.trim() === ""
-        : isGrid
-          ? groups.length === 0
-          : showing.length === 0
+        : isQueue
+          ? false // the queue renders its own empty state below
+          : isGrid
+            ? groups.length === 0
+            : showing.length === 0
     : false;
   const activeTracks = filteredPlTracks ?? groupTracks ?? showing;
 
@@ -817,18 +1008,22 @@ function App() {
             ? "Folders"
             : view.kind === "playlists"
               ? "Playlists"
-              : view.kind === "playlist"
-                ? plName
-                : detailTitle;
+              : view.kind === "queue"
+                ? "Queue"
+                : view.kind === "playlist"
+                  ? plName
+                  : detailTitle;
   const count = isGrid
     ? groups.length
     : isPlaylists
       ? playlists?.length ?? 0
       : isPlaylistDetail
         ? filteredPlTracks?.length ?? 0
-        : groupKind && groupTracks
-          ? groupTracks.length
-          : showing.length;
+        : isQueue
+          ? queue?.length ?? 0
+          : groupKind && groupTracks
+            ? groupTracks.length
+            : showing.length;
 
   return (
     <Shell playerState={playerState} view={view} onNavigate={setView}>
@@ -930,6 +1125,26 @@ function App() {
               </button>
             </>
           )}
+          {isQueue && (queue?.length ?? 0) > 0 && (
+            <>
+              {saveQueueOpen ? (
+                <InlineName
+                  initial=""
+                  placeholder="Playlist name…"
+                  onSave={(n) => void onSaveQueue(n)}
+                  onCancel={() => setSaveQueueOpen(false)}
+                />
+              ) : (
+                <button
+                  className="btn-ghost"
+                  onClick={() => setSaveQueueOpen(true)}
+                  disabled={scanning || adding}
+                >
+                  Save as playlist
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -1001,6 +1216,23 @@ function App() {
             <h2>This playlist is empty</h2>
             <p>Use the “+” button next to any song to add it here.</p>
           </div>
+        ) : isQueue && queue === null ? (
+          <Skeleton count={10} />
+        ) : isQueue && queue !== null && queue.length === 0 ? (
+          <div className="empty">
+            <img className="empty-mark" src={iwaksMark} alt="" />
+            <h2>The queue is empty</h2>
+            <p>
+              Start playing anything to build your session queue — then reorder
+              it here, or save it as a playlist.
+            </p>
+          </div>
+        ) : isQueue && queue ? (
+          <QueueList
+            tracks={queue}
+            playingPath={playerState?.current?.path ?? null}
+            onReorder={(from, to) => void onReorderQueue(from, to)}
+          />
         ) : isEmpty ? (
           <div className="empty">
             <img className="empty-mark" src={iwaksMark} alt="" />
