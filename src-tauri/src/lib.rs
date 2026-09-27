@@ -7,6 +7,7 @@ use iwaks_library::db::Library;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
+use iwaks_smtc::{NowPlaying, SmtcButton, SmtcSession};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -17,6 +18,9 @@ pub struct AppState {
     db_path: PathBuf,
     scanning: Arc<AtomicBool>,
     player: Arc<Mutex<Option<Arc<Player>>>>,
+    /// Keeps the SMTC session thread alive for the whole app lifetime
+    /// (dropping every handle would exit that thread).
+    _smtc: Option<SmtcSession>,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -28,6 +32,26 @@ struct ScanEvent {
 
 const PLAYER_UNAVAILABLE: &str =
     "Playback is unavailable — libmpv DLL missing or failed to initialize";
+
+/// Map the player's last state to the SMTC surface (Discord status via Music
+/// Presence + the Windows media flyout). Title/artist/album fall back inside
+/// `iwaks-smtc`; duration prefers the live mpv value, then the tag value.
+fn now_playing(s: &PlayerState) -> NowPlaying {
+    let cur = s.current.as_ref();
+    NowPlaying {
+        title: cur.map(|t| t.title.clone()).unwrap_or_default(),
+        artist: cur.and_then(|t| t.artist.clone()),
+        album: cur.and_then(|t| t.album.clone()),
+        position_secs: s.position,
+        duration_secs: if s.duration > 0.0 {
+            s.duration
+        } else {
+            cur.map(|t| t.duration_ms as f64 / 1000.0).unwrap_or(0.0)
+        },
+        playing: s.current.is_some() && !s.paused && !s.stopped,
+        stopped: s.stopped,
+    }
+}
 
 fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
@@ -519,10 +543,18 @@ pub fn run() {
             let db_path = data_dir.join("iwaks.db");
 
             let handle = app.handle().clone();
+            // SMTC session (Windows): publishes track metadata + position +
+            // play/pause to the OS, which is how Music Presence and the media
+            // flyout discover Iwaks. `None` on non-Windows / WinRT failure.
+            let smtc = SmtcSession::start();
+            let smtc_for_sink = smtc.clone();
             let player = match Player::start(
                 &PlayerOptions::default(),
                 Box::new(move |s: &PlayerState| {
                     let _ = handle.emit("player-state", s.clone());
+                    if let Some(session) = &smtc_for_sink {
+                        session.update(&now_playing(s));
+                    }
                 }),
             ) {
                 Ok(p) => Some(p),
@@ -533,10 +565,33 @@ pub fn run() {
                 }
             };
 
+            // Media keys / flyout buttons drive the live player. Pause-forces
+            // only when playing and vice-versa (toggle alone would invert a
+            // redundant press).
+            if let (Some(p), Some(session)) = (&player, &smtc) {
+                let p = Arc::clone(p);
+                session.on_button(Box::new(move |btn| match btn {
+                    SmtcButton::Play => {
+                        if p.snapshot().paused {
+                            p.toggle_play();
+                        }
+                    }
+                    SmtcButton::Pause => {
+                        if !p.snapshot().paused {
+                            p.toggle_play();
+                        }
+                    }
+                    SmtcButton::Next => p.next(),
+                    SmtcButton::Previous => p.prev(),
+                    SmtcButton::Stop => p.stop(),
+                }));
+            }
+
             app.manage(AppState {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
                 player: Arc::new(Mutex::new(player)),
+                _smtc: smtc,
             });
 
             // Auto-open the mini player while the main window is minimized,
