@@ -31,6 +31,15 @@ import "./App.css";
 import { formatBadge, formatDuration, scanSummary } from "./format";
 import { Cover } from "./Cover";
 import PlayerBar from "./PlayerBar";
+import {
+  Folder,
+  ListBullets,
+  MusicNote,
+  Queue as QueueIcon,
+  UserCircle,
+  VinylRecord,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { Playlist, PlayerState, ScanProgress, Track } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
 
@@ -819,13 +828,14 @@ function Skeleton({ count }: { count: number }) {
 const NAV_ITEMS: Array<{
   id: "songs" | "albums" | "artists" | "folders" | "playlists" | "queue";
   label: string;
+  icon: Icon;
 }> = [
-  { id: "songs", label: "Songs" },
-  { id: "albums", label: "Albums" },
-  { id: "artists", label: "Artists" },
-  { id: "folders", label: "Folders" },
-  { id: "playlists", label: "Playlists" },
-  { id: "queue", label: "Queue" },
+  { id: "songs", label: "Songs", icon: MusicNote },
+  { id: "albums", label: "Albums", icon: VinylRecord },
+  { id: "artists", label: "Artists", icon: UserCircle },
+  { id: "folders", label: "Folders", icon: Folder },
+  { id: "playlists", label: "Playlists", icon: QueueIcon },
+  { id: "queue", label: "Queue", icon: ListBullets },
 ];
 
 /** Which sidebar entries the current view belongs under (grid or its detail). */
@@ -909,7 +919,13 @@ function Shell({
                 aria-current={active ? "page" : undefined}
                 onClick={() => onNavigate({ kind: item.id })}
               >
-                {item.label}
+                <item.icon
+                  className="nav-ico"
+                  size={18}
+                  weight={active ? "fill" : "regular"}
+                  aria-hidden="true"
+                />
+                <span>{item.label}</span>
               </button>
             );
           })}

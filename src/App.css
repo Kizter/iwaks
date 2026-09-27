@@ -104,7 +104,9 @@ body {
 }
 
 .nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 8px 12px;
   border: none;
@@ -128,6 +130,19 @@ body {
   background: var(--ice);
   color: var(--ink);
   font-weight: 600;
+}
+
+.nav-ico {
+  flex: none;
+  color: var(--text-dim);
+}
+
+.nav-item:hover .nav-ico {
+  color: var(--ink-soft);
+}
+
+.nav-item.active .nav-ico {
+  color: var(--ink);
 }
 
 /* ---------- main ---------- */
@@ -685,12 +700,19 @@ body {
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  transition: background-color 120ms ease-out, color 120ms ease-out;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 80ms ease-out;
 }
 
 .icon-btn:hover:not(:disabled) {
   background: var(--mint);
   color: var(--ink);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.94);
 }
 
 .icon-btn:disabled {
@@ -709,14 +731,12 @@ body {
   background: #02598f;
 }
 
-.icon-btn.repeat-on {
-  color: var(--ink);
+.icon-btn.play-main:active:not(:disabled) {
+  transform: scale(0.94);
 }
 
-.repeat-glyph {
-  font-size: 0.8rem;
-  font-weight: 700;
-  line-height: 1;
+.icon-btn.repeat-on {
+  color: var(--ink);
 }
 
 .icon-btn.speed-btn {
@@ -726,27 +746,58 @@ body {
   white-space: nowrap;
 }
 
-.sleep-ctl {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-dim);
-  font-size: 0.72rem;
+.sleep-wrap {
+  position: relative;
 }
 
-.sleep-ctl select {
+.sleep-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: 168px;
+  padding: 6px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 6px;
-  font-size: 0.72rem;
-  color: var(--text);
+  border-radius: 12px;
   background: var(--surface);
+  box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: pop-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.sleep-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
   cursor: pointer;
 }
 
-.sleep-ctl select:disabled {
-  opacity: 0.4;
-  cursor: default;
+.sleep-opt:hover {
+  background: var(--mint);
+}
+
+.sleep-opt.on {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.sleep-opt-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
 }
 
 .sleep-count {
@@ -757,6 +808,17 @@ body {
 }
 
 /* ---- EQ popover ---- */
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 .eq-wrap {
   position: relative;
@@ -776,6 +838,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  animation: pop-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .eq-head {
@@ -908,6 +971,7 @@ input[type="range"].eq-slider::-moz-range-thumb {
   box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
   display: flex;
   flex-direction: column;
+  animation: pop-in 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .lyr-list {
@@ -950,33 +1014,6 @@ input[type="range"].eq-slider::-moz-range-thumb {
   white-space: pre-wrap;
   max-height: min(50vh, 380px);
   overflow-y: auto;
-}
-
-/* ---- Visualizer popover ---- */
-
-.viz-wrap {
-  position: relative;
-}
-
-.viz-pop {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  right: 0;
-  z-index: 40;
-  width: 360px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(2, 106, 167, 0.18);
-}
-
-.viz-canvas {
-  display: block;
-  width: 100%;
-  height: 150px;
-  border-radius: 8px;
-  background: #f0f4e6;
 }
 
 /* ---- always-on-top mini player window (#mini) ---- */
@@ -1245,6 +1282,15 @@ input[type="range"]:disabled {
   .sk-row {
     animation: none;
     background: #e9edda;
+  }
+  .eq-pop,
+  .lyr-pop,
+  .sleep-pop {
+    animation: none;
+  }
+  .icon-btn:active:not(:disabled),
+  .icon-btn.play-main:active:not(:disabled) {
+    transform: none;
   }
 }
 

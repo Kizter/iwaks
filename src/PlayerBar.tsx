@@ -19,7 +19,22 @@ import {
   toggleMiniPlayer,
 } from "./api";
 import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode } from "./types";
-import { Visualizer } from "./Visualizer";
+import {
+  DiceFour,
+  Moon,
+  MusicNotes,
+  Pause,
+  PictureInPicture,
+  Play,
+  Repeat,
+  RepeatOnce,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  SlidersHorizontal,
+  SpeakerHigh,
+  SpeakerSlash,
+} from "@phosphor-icons/react";
 
 const REPEAT_ORDER: RepeatMode[] = ["off", "all", "one"];
 const REPEAT_TITLE: Record<RepeatMode, string> = {
@@ -44,136 +59,10 @@ const SLEEP_OPTIONS: Array<{ value: string; label: string }> = [
 const EQ_LABELS = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
 const EQ_ZERO = Array(EQ_LABELS.length).fill(0) as number[];
 
-function EqBarsIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M2.5 3h3v10h-3zM6.5 6h3v7h-3zM10.5 2h3v11h-3z"
-      />
-    </svg>
-  );
-}
-
 /** Compact dB label: "0", "-3.5", "+6". */
 function fmtDb(v: number): string {
   const s = Math.round(v * 10) / 10;
   return `${s > 0 ? "+" : ""}${s}`;
-}
-
-function LyricsIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M2 3.4h12v1.6H2zM2 7.2h12v1.6H2zM2 11h8v1.6H2z"
-      />
-    </svg>
-  );
-}
-
-function VizIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M1.6 6.4h1.9v3.2H1.6zM4.7 4.4h1.9v7.2H4.7zM7.8 1.9h1.9v12.2H7.8zM10.9 4.4h1.9v7.2h-1.9zM13.9 6.4h1.9v3.2h-1.9z"
-      />
-    </svg>
-  );
-}
-
-/** Small window frame with bars — the "always-on-top mini player" button. */
-function MiniWinIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M2 3h12v10H2zm1.2 1.4v7.2h9.6V4.4zm2 6V6h1.5v4.4zm2.6 0V5h1.5v5.4zm2.5 0V6.6h1.5v3.8z"
-      />
-    </svg>
-  );
-}
-
-function ShuffleIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M1.8 4.4h2.3c1.1 0 2.1.5 2.7 1.4l.5.7-.9 1.2-.5-.7c-.4-.5-.9-.8-1.5-.8H1.8zm9.9 0h2l-2.3 2.3-2.3-2.3-.9.9 3.2 3.2 3.2-3.2-.9-.9zM2.2 11.6h.9c1.1 0 2.1-.5 2.7-1.4l3.1-4.5c.4-.5.9-.8 1.5-.8h.9l-2.3 2.3-2.3-2.3-.9.9 3.2 3.2 3.2-3.2-.9-.9h-2c-1.1 0-2.1.5-2.7 1.4l-3.1 4.5c-.2.3-.3.6-.3.9v.7h.9z"
-      />
-    </svg>
-  );
-}
-
-function DiceIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M3 2h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" />
-      <g fill="#fff">
-        <circle cx="5.5" cy="5.5" r="1.2" />
-        <circle cx="10.5" cy="5.5" r="1.2" />
-        <circle cx="5.5" cy="10.5" r="1.2" />
-        <circle cx="10.5" cy="10.5" r="1.2" />
-      </g>
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path fill="currentColor" d="M4 2.6v10.8l8.6-5.4L4 2.6z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path fill="currentColor" d="M3.5 2.5h3.2v11H3.5zM9.3 2.5h3.2v11H9.3z" />
-    </svg>
-  );
-}
-
-function PrevIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path fill="currentColor" d="M3 2.5h1.9v11H3zM13.4 3.1v9.8L6.9 8l6.5-4.9z" />
-    </svg>
-  );
-}
-
-function NextIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path fill="currentColor" d="M11.1 2.5H13v11h-1.9zM2.6 3.1v9.8L9.1 8 2.6 3.1z" />
-    </svg>
-  );
-}
-
-function VolumeIcon({ muted }: { muted: boolean }) {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M1.5 5.2v5.6h2.9l3.6 2.9V2.3L4.4 5.2H1.5z"
-      />
-      {muted ? (
-        <path fill="currentColor" d="M11.2 5.1l4.5 4.5-.9.9-4.5-4.5.9-.9zm-.9 4.5l.9.9 4.5-4.5-.9-.9-4.5 4.5z" />
-      ) : (
-        <path
-          fill="currentColor"
-          d="M11.5 6.3a3.4 3.4 0 0 1 0 3.4l-1.1-.7a2.2 2.2 0 0 0 0-2l1.1-.7z"
-        />
-      )}
-    </svg>
-  );
-}
-
-function RepeatIcon({ mode }: { mode: RepeatMode }) {
-  const glyph = mode === "one" ? "1" : mode === "all" ? "2" : "↻";
-  return <span className="repeat-glyph">{glyph}</span>;
 }
 
 /** Always-visible bottom bar: now-playing, transport, seek, repeat, volume. */
@@ -184,7 +73,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(undefined);
-  const [vizOpen, setVizOpen] = useState(false);
+  const [sleepOpen, setSleepOpen] = useState(false);
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
   const playing = hasTrack && !state!.paused && !state!.stopped;
@@ -326,7 +215,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             aria-label="Previous track"
             title="Previous track"
           >
-            <PrevIcon />
+            <SkipBack size={18} aria-hidden="true" />
           </button>
           <button
             className="icon-btn play-main"
@@ -335,7 +224,11 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             aria-label={playing ? "Pause" : "Play"}
             title={playing ? "Pause" : "Play"}
           >
-            {playing ? <PauseIcon /> : <PlayIcon />}
+            {playing ? (
+              <Pause size={20} aria-hidden="true" />
+            ) : (
+              <Play size={20} aria-hidden="true" />
+            )}
           </button>
           <button
             className="icon-btn"
@@ -344,7 +237,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             aria-label="Next track"
             title="Next track"
           >
-            <NextIcon />
+            <SkipForward size={18} aria-hidden="true" />
           </button>
         </div>
         <div className="pb-time">
@@ -376,7 +269,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           aria-label="Shuffle"
           aria-pressed={shuffle}
         >
-          <ShuffleIcon />
+          <Shuffle size={18} aria-hidden="true" />
         </button>
         <button
           className="icon-btn dice-btn"
@@ -385,7 +278,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           title={shuffle ? "Reshuffle the remaining tracks" : "Shuffle (randomizes the rest of the list)"}
           aria-label="Reshuffle remaining tracks"
         >
-          <DiceIcon />
+          <DiceFour size={18} aria-hidden="true" />
         </button>
         <button
           className={`icon-btn${repeat !== "off" ? " repeat-on" : ""}`}
@@ -395,7 +288,11 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           aria-label={REPEAT_TITLE[repeat]}
           aria-pressed={repeat !== "off"}
         >
-          <RepeatIcon mode={repeat} />
+          {repeat === "one" ? (
+            <RepeatOnce size={18} aria-hidden="true" />
+          ) : (
+            <Repeat size={18} aria-hidden="true" />
+          )}
         </button>
         <button
           className="icon-btn speed-btn"
@@ -406,25 +303,41 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
         >
           {String(speed)}×
         </button>
-        <label className="sleep-ctl">
-          <span className="sleep-label">Sleep</span>
-          <select
-            value={sleepChoice}
+        <div className="sleep-wrap">
+          <button
+            className="icon-btn"
+            onClick={() => setSleepOpen((o) => !o)}
             disabled={!state}
+            title={sleepRemaining !== null ? "Sleep timer active" : "Sleep timer"}
             aria-label="Sleep timer"
-            onChange={(e) => {
-              const value = e.target.value;
-              setSleepChoice(value);
-              void playerSetSleepTimer(value === "off" ? null : Number(value));
-            }}
+            aria-expanded={sleepOpen}
           >
-            {SLEEP_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <Moon size={18} aria-hidden="true" />
+          </button>
+          {sleepOpen && (
+            <div className="sleep-pop" role="menu" aria-label="Sleep timer">
+              {SLEEP_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sleepChoice === o.value}
+                  className={`sleep-opt${sleepChoice === o.value ? " on" : ""}`}
+                  onClick={() => {
+                    setSleepChoice(o.value);
+                    setSleepOpen(false);
+                    void playerSetSleepTimer(o.value === "off" ? null : Number(o.value));
+                  }}
+                >
+                  <span>{o.label}</span>
+                  {sleepChoice === o.value && (
+                    <span className="sleep-opt-dot" aria-hidden="true" />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {sleepRemaining !== null && sleepRemaining > 0 && (
           <span className="sleep-count" aria-label="Sleep timer remaining">
             {formatDuration(Math.round(sleepRemaining * 1000))}
@@ -440,7 +353,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             aria-expanded={eqOpen}
             aria-pressed={eqDraft !== null}
           >
-            <EqBarsIcon />
+            <SlidersHorizontal size={18} aria-hidden="true" />
           </button>
           {eqOpen && state && (
             <div className="eq-pop" role="group" aria-label="Equalizer panel">
@@ -514,7 +427,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             aria-label="Lyrics"
             aria-expanded={lyricsOpen}
           >
-            <LyricsIcon />
+            <MusicNotes size={18} aria-hidden="true" />
           </button>
           {lyricsOpen && state && (
             <div className="lyr-pop" role="group" aria-label="Lyrics panel">
@@ -540,37 +453,15 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             </div>
           )}
         </div>
-        <div className="viz-wrap">
-          <button
-            className="icon-btn"
-            onClick={() => setVizOpen((o) => !o)}
-            disabled={!state}
-            title="Visualizer"
-            aria-label="Visualizer"
-            aria-expanded={vizOpen}
-          >
-            <VizIcon />
-          </button>
-          {vizOpen && (
-            <div className="viz-pop" role="group" aria-label="Visualizer panel">
-              <Visualizer
-                state={state}
-                seed={cur?.path ?? null}
-                variant="panel"
-                className="viz-canvas"
-              />
-            </div>
-          )}
-          <button
-            className="icon-btn"
-            onClick={() => void toggleMiniPlayer()}
-            disabled={!state}
-            title="Always-on-top mini player window"
-            aria-label="Open mini player window"
-          >
-            <MiniWinIcon />
-          </button>
-        </div>
+        <button
+          className="icon-btn"
+          onClick={() => void toggleMiniPlayer()}
+          disabled={!state}
+          title="Always-on-top mini player window"
+          aria-label="Open mini player window"
+        >
+          <PictureInPicture size={18} aria-hidden="true" />
+        </button>
         <button
           className="icon-btn"
           onClick={() => void playerToggleMute()}
@@ -578,7 +469,11 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           aria-label={mute ? "Unmute" : "Mute"}
           title={mute ? "Unmute" : "Mute"}
         >
-          <VolumeIcon muted={mute} />
+          {mute ? (
+            <SpeakerSlash size={18} aria-hidden="true" />
+          ) : (
+            <SpeakerHigh size={18} aria-hidden="true" />
+          )}
         </button>
         <input
           type="range"

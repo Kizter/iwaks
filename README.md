@@ -11,7 +11,7 @@ Built with **Tauri v2 (Rust) + React/TypeScript**. Audio engine: **libmpv → WA
 - ✅ **M2** — Playback (libmpv), player bar
 - ✅ **M3** — speed + sleep timer, EQ + ReplayGain, lyrics, generative visualizer
 - ✅ **Post-M3** — shared-WASAPI audio fix, add files / scan folder, shuffle + reshuffle, Albums / Artists / Folders browse, mini player window on minimize
-- ✅ **M4** — Playlists (slice 1: CRUD + `.m3u` import/export, add/remove songs), queue (slice 2: Queue view, drag-reorder, save-as-playlist), folder browse (slice 3: hierarchical tree, drill-down, breadcrumb), tag editor (slice 4: 8-field modal, `.bak` backup, library sync), mini player (slice 5: mini window jadi player — draggable di mana saja, play/pause, prev/next, shuffle, ganti playlist/queue) — **M4 complete**
+- ✅ **M4** — Playlists (slice 1: CRUD + `.m3u` import/export, add/remove songs), queue (slice 2: Queue view, drag-reorder, save-as-playlist), folder browse (slice 3: hierarchical tree, drill-down, breadcrumb), tag editor (slice 4: 8-field modal, `.bak` backup, library sync), mini player (slice 5: mini window jadi player — draggable di mana saja, play/pause, prev/next, shuffle, ganti playlist/queue), UI polish (slice 6: visualizer dihapus, ikon flat Phosphor, menu sidebar + player bar diperbaiki) — **M4 complete**
 - ⏳ **M5** — Casting (DLNA → Chromecast), installer, release
 
 Format support (target): FLAC, WAV, ALAC, MP3, AAC, OGG, Opus, WavPack, AIFF, WMA Lossless, DSD (DSF/DFF).
