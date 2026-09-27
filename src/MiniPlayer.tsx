@@ -8,6 +8,16 @@ import { useEffect, useRef, useState } from "react";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  ListBullets,
+  Pause,
+  Play,
+  Queue as QueueIcon,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  X,
+} from "@phosphor-icons/react";
+import {
   getPlaylistTracks,
   getPlayerState,
   getQueue,
@@ -21,68 +31,6 @@ import {
 } from "./api";
 import type { Playlist, PlayerState, Track } from "./types";
 import { Cover, NoteIcon } from "./Cover";
-
-function CloseIcon() {
-  return (
-    <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true">
-      <path fill="currentColor" d="M2.5 2.5l9 9M11.5 2.5l-9 9" stroke="currentColor" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M4 2.6v10.8l8.6-5.4L4 2.6z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M3.5 2.5h3.2v11H3.5zM9.3 2.5h3.2v11H9.3z" />
-    </svg>
-  );
-}
-
-function PrevIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M3 2.5h1.9v11H3zM13.4 3.1v9.8L6.9 8l6.5-4.9z" />
-    </svg>
-  );
-}
-
-function NextIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M11.1 2.5H13v11h-1.9zM2.6 3.1v9.8L9.1 8 2.6 3.1z" />
-    </svg>
-  );
-}
-
-function ShuffleIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M1.8 4.4h2.3c1.1 0 2.1.5 2.7 1.4l.5.7-.9 1.2-.5-.7c-.4-.5-.9-.8-1.5-.8H1.8zm9.9 0h2l-2.3 2.3-2.3-2.3-.9.9 3.2 3.2 3.2-3.2-.9-.9zM2.2 11.6h.9c1.1 0 2.1-.5 2.7-1.4l3.1-4.5c.4-.5.9-.8 1.5-.8h.9l-2.3 2.3-2.3-2.3-.9.9 3.2 3.2 3.2-3.2-.9-.9h-2c-1.1 0-2.1.5-2.7 1.4l-3.1 4.5c-.2.3-.3.6-.3.9v.7h.9z"
-      />
-    </svg>
-  );
-}
-
-function PlaylistIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M2 3.2h12v1.6H2zM2 7h12v1.6H2zM2 10.8h7.2v1.6H2z"
-      />
-    </svg>
-  );
-}
 
 export function MiniPlayer() {
   const [state, setState] = useState<PlayerState | null>(null);
@@ -213,7 +161,7 @@ export function MiniPlayer() {
           aria-label="Close mini player"
           title="Close"
         >
-          <CloseIcon />
+          <X size={14} aria-hidden="true" />
         </button>
       </div>
 
@@ -227,7 +175,7 @@ export function MiniPlayer() {
           aria-pressed={shuffle}
           title={shuffle ? "Shuffle on" : "Shuffle"}
         >
-          <ShuffleIcon />
+          <Shuffle size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -237,7 +185,7 @@ export function MiniPlayer() {
           aria-label="Previous track"
           title="Previous track"
         >
-          <PrevIcon />
+          <SkipBack size={16} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -247,7 +195,11 @@ export function MiniPlayer() {
           aria-label={playing ? "Pause" : "Play"}
           title={playing ? "Pause" : "Play"}
         >
-          {playing ? <PauseIcon /> : <PlayIcon />}
+          {playing ? (
+            <Pause size={20} aria-hidden="true" />
+          ) : (
+            <Play size={20} aria-hidden="true" />
+          )}
         </button>
         <button
           type="button"
@@ -257,7 +209,7 @@ export function MiniPlayer() {
           aria-label="Next track"
           title="Next track"
         >
-          <NextIcon />
+          <SkipForward size={16} aria-hidden="true" />
         </button>
 
         <div className="mp-picker">
@@ -270,7 +222,11 @@ export function MiniPlayer() {
             aria-expanded={pickerOpen}
             title="Change what's playing"
           >
-            <PlaylistIcon />
+            {source === "Queue" ? (
+              <QueueIcon size={15} aria-hidden="true" />
+            ) : (
+              <ListBullets size={15} aria-hidden="true" />
+            )}
             <span className="mp-source-name">{source}</span>
           </button>
         </div>
@@ -285,7 +241,8 @@ export function MiniPlayer() {
             className={`mp-panel-item${source === "Queue" ? " on" : ""}`}
             onClick={() => void playQueue()}
           >
-            <span>Queue (session)</span>
+            <QueueIcon size={16} className="mp-panel-ico" aria-hidden="true" />
+            <span className="mp-panel-name">Queue (session)</span>
           </button>
           {(playlists ?? []).map((p) => (
             <button
@@ -296,7 +253,8 @@ export function MiniPlayer() {
               className={`mp-panel-item${source === p.name ? " on" : ""}`}
               onClick={() => void playPlaylist(p.id, p.name)}
             >
-              <span>{p.name}</span>
+              <ListBullets size={16} className="mp-panel-ico" aria-hidden="true" />
+              <span className="mp-panel-name">{p.name}</span>
               <span className="mp-panel-count">{p.trackCount}</span>
             </button>
           ))}
