@@ -1,11 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { MiniViz } from "./MiniViz";
+import { MiniPlayer } from "./MiniPlayer";
 
 function Root() {
-  // The mini visualizer window loads this same app with `#mini` in the URL.
-  return window.location.hash === "#mini" ? <MiniViz /> : <App />;
+  // The mini player window loads this same app with `#mini` in the URL.
+  return window.location.hash === "#mini" ? <MiniPlayer /> : <App />;
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

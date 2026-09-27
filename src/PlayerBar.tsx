@@ -14,9 +14,9 @@ import {
   playerSetSleepTimer,
   playerSetSpeed,
   playerSetVolume,
-  toggleMiniVisualizer,
   playerToggleMute,
   playerTogglePlay,
+  toggleMiniPlayer,
 } from "./api";
 import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode } from "./types";
 import { Visualizer } from "./Visualizer";
@@ -83,7 +83,7 @@ function VizIcon() {
   );
 }
 
-/** Small window frame with bars — the "always-on-top mini visualizer" button. */
+/** Small window frame with bars — the "always-on-top mini player" button. */
 function MiniWinIcon() {
   return (
     <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
@@ -563,10 +563,10 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           )}
           <button
             className="icon-btn"
-            onClick={() => void toggleMiniVisualizer()}
+            onClick={() => void toggleMiniPlayer()}
             disabled={!state}
-            title="Always-on-top mini visualizer window"
-            aria-label="Open mini visualizer window"
+            title="Always-on-top mini player window"
+            aria-label="Open mini player window"
           >
             <MiniWinIcon />
           </button>

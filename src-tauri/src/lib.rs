@@ -312,11 +312,13 @@ impl Drop for ScanGuard {
     }
 }
 
-/// Label of the always-on-top mini visualizer window.
+/// Label of the always-on-top mini player window.
 const MINI_LABEL: &str = "mini";
 
-/// Create the mini visualizer window if it doesn't exist yet. It loads the
-/// same frontend with `#mini` in the URL; `App` switches to the mini layout.
+/// Create the mini player window if it doesn't exist yet. It loads the same
+/// frontend with `#mini` in the URL; `App` switches to the mini layout. The
+/// whole window surface is a drag region (CSS `data-tauri-drag-region`), so
+/// it can be dragged anywhere even though it is frameless.
 fn open_mini_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window(MINI_LABEL).is_some() {
         return Ok(());
@@ -326,9 +328,9 @@ fn open_mini_window(app: &AppHandle) -> Result<(), String> {
         MINI_LABEL,
         tauri::WebviewUrl::App("index.html#mini".into()),
     )
-    .title("Iwaks Visualizer")
-    .inner_size(480.0, 320.0)
-    .min_inner_size(320.0, 213.0)
+    .title("Iwaks Mini Player")
+    .inner_size(320.0, 160.0)
+    .min_inner_size(280.0, 145.0)
     .resizable(true)
     .maximizable(false)
     .minimizable(false)
@@ -340,7 +342,7 @@ fn open_mini_window(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Open the mini visualizer when the main window is minimized, close it when
+/// Open the mini player when the main window is minimized, close it when
 /// the main window comes back.
 ///
 /// The open/close is **deferred off the window-event callback**: creating a
@@ -370,7 +372,7 @@ fn sync_mini(app: &AppHandle) {
 
 /// Manual toggle from the player bar (independent of the minimized state).
 #[tauri::command]
-fn toggle_mini_visualizer(app: AppHandle) -> Result<(), String> {
+fn toggle_mini_player(app: AppHandle) -> Result<(), String> {
     if let Some(mini) = app.get_webview_window(MINI_LABEL) {
         let _ = mini.close();
     } else {
@@ -537,7 +539,7 @@ pub fn run() {
                 player: Arc::new(Mutex::new(player)),
             });
 
-            // Auto-open the mini visualizer while the main window is minimized,
+            // Auto-open the mini player while the main window is minimized,
             // close it on restore, and never let it outlive the main window.
             let main_handle = app.handle().clone();
             if let Some(main) = app.get_webview_window("main") {
@@ -583,7 +585,7 @@ pub fn run() {
             get_player_state,
             get_lyrics,
             write_tags,
-            toggle_mini_visualizer,
+            toggle_mini_player,
             list_playlists,
             create_playlist,
             rename_playlist,

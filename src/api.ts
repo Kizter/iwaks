@@ -148,9 +148,9 @@ export function writeTags(path: string, edits: TagEdits): Promise<Track> {
   return invoke<Track>("write_tags", { path, edits });
 }
 
-/** Toggle the always-on-top mini visualizer window (player-bar button). */
-export function toggleMiniVisualizer(): Promise<void> {
-  return invoke<void>("toggle_mini_visualizer");
+/** Toggle the always-on-top mini player window (player-bar button). */
+export function toggleMiniPlayer(): Promise<void> {
+  return invoke<void>("toggle_mini_player");
 }
 
 export function playerStop(): Promise<void> {
