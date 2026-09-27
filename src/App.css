@@ -1427,3 +1427,84 @@ input[type="range"]:disabled {
   text-transform: uppercase;
   color: var(--text-dim);
 }
+
+/* ---------- tag editor (M4 slice 4) ---------- */
+
+.tag-editor {
+  width: min(440px, 90vw);
+}
+.tag-editor-title {
+  margin: 0 0 2px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.tag-editor-path {
+  margin: 0 0 14px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.tag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+.tag-nums {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 12px;
+  margin-top: 10px;
+}
+.tag-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.tag-field-wide {
+  grid-column: 1 / -1;
+}
+.tag-field input {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ice);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+.tag-field input:focus-visible {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(2, 106, 167, 0.15);
+}
+.tag-editor-error {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #b3261e;
+}
+.tag-editor-note {
+  margin: 12px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.tag-editor-note code {
+  font-family: inherit;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.tag-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}

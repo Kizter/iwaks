@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use iwaks_core::track::Track;
+use iwaks_core::track::{TagEdits, Track};
 use iwaks_library::db::Library;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
@@ -76,6 +76,30 @@ fn get_lyrics(path: String) -> Option<iwaks_tags::lyrics::Lyrics> {
     iwaks_tags::lyrics::read_lyrics(std::path::Path::new(&path))
         .ok()
         .flatten()
+}
+
+/// Write the 8 editable tag fields of a track file (`.bak` backup first, via
+/// `iwaks-tags`), then refresh the library row from the tags that landed on
+/// disk. Returns the updated track. Playback is never touched.
+#[tauri::command]
+fn write_tags(path: String, edits: TagEdits, state: State<'_, AppState>) -> Result<Track, String> {
+    let file_path = std::path::Path::new(&path);
+    let meta = iwaks_tags::write::apply_edits(file_path, &edits).map_err(|e| e.to_string())?;
+
+    let stat = std::fs::metadata(file_path).map_err(|e| e.to_string())?;
+    let modified = stat
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let track = Track::from_metadata(&path, &meta, stat.len() as i64, modified);
+    let id = open_lib(&state)?
+        .upsert_track(&track)
+        .map_err(|e| e.to_string())?;
+    let mut updated = track;
+    updated.id = id;
+    Ok(updated)
 }
 
 /// Kick off a background incremental scan of `path`. Emits `scan-started`,
@@ -558,6 +582,7 @@ pub fn run() {
             stop_playback,
             get_player_state,
             get_lyrics,
+            write_tags,
             toggle_mini_visualizer,
             list_playlists,
             create_playlist,

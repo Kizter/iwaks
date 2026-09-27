@@ -30,6 +30,42 @@ impl AudioMetadata {
     }
 }
 
+/// Full snapshot of the user-editable core tag fields for one track.
+/// `title` is required (the editor always sends it; blank means the title
+/// tag is removed and the library falls back to the file stem). Every other
+/// field is optional: `None` means that tag is *removed* from the file.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagEdits {
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub album_artist: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<i64>,
+    pub track_no: Option<i64>,
+    pub disc_no: Option<i64>,
+}
+
+impl TagEdits {
+    /// Replace the 8 core tag fields on a *copy* of `meta` — the input is
+    /// never mutated (immutability rule). Blank title → `None`; `None`
+    /// fields remove the corresponding tags when written.
+    pub fn merge(&self, meta: &AudioMetadata) -> AudioMetadata {
+        AudioMetadata {
+            title: (!self.title.trim().is_empty()).then(|| self.title.trim().to_string()),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
+            album_artist: self.album_artist.clone(),
+            genre: self.genre.clone(),
+            year: self.year,
+            track_no: self.track_no,
+            disc_no: self.disc_no,
+            ..meta.clone()
+        }
+    }
+}
+
 /// A track as stored/returned by the library.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,5 +184,79 @@ mod tests {
         assert_eq!(t.file_size, 99);
         assert_eq!(t.modified_at, 42);
         assert_eq!(t.id, 0);
+    }
+
+    // ---- TagEdits::merge (M4 slice 4 — tag editor) ----
+
+    fn edits_with(title: &str) -> TagEdits {
+        TagEdits {
+            title: title.to_string(),
+            artist: Some("Artis".to_string()),
+            album: Some("Album".to_string()),
+            album_artist: Some("Album Artis".to_string()),
+            genre: Some("Jazz".to_string()),
+            year: Some(2021),
+            track_no: Some(3),
+            disc_no: Some(1),
+        }
+    }
+
+    #[test]
+    fn merge_applies_all_edits_on_a_fresh_value() {
+        let base = meta_with(Some("Lama"));
+        let merged = edits_with("Baru").merge(&base);
+
+        assert_eq!(merged.title.as_deref(), Some("Baru"));
+        assert_eq!(merged.artist.as_deref(), Some("Artis"));
+        assert_eq!(merged.album.as_deref(), Some("Album"));
+        assert_eq!(merged.album_artist.as_deref(), Some("Album Artis"));
+        assert_eq!(merged.genre.as_deref(), Some("Jazz"));
+        assert_eq!(merged.year, Some(2021));
+        assert_eq!(merged.track_no, Some(3));
+        assert_eq!(merged.disc_no, Some(1));
+        // The input must not be mutated (immutability rule).
+        assert_eq!(base.title.as_deref(), Some("Lama"));
+        assert_eq!(base.artist, None);
+    }
+
+    #[test]
+    fn merge_blank_title_yields_none() {
+        let base = meta_with(Some("Lama"));
+        let merged = edits_with("   ").merge(&base);
+        assert_eq!(merged.title, None, "blank title must remove the title tag");
+    }
+
+    #[test]
+    fn merge_none_fields_remove_tags() {
+        let base = meta_with(Some("T"));
+        let edits = TagEdits {
+            title: "T".to_string(),
+            artist: None,
+            album: Some("Album".to_string()),
+            ..Default::default()
+        };
+        let merged = edits.merge(&base);
+        assert_eq!(merged.artist, None, "None must remove the artist tag");
+        assert_eq!(merged.album.as_deref(), Some("Album"));
+        assert_eq!(merged.genre, None);
+        assert_eq!(merged.year, None);
+    }
+
+    #[test]
+    fn merge_keeps_technical_fields_from_source() {
+        let base = AudioMetadata {
+            duration_ms: 123_456,
+            sample_rate: Some(192_000),
+            bit_depth: Some(24),
+            bitrate: Some(4_000),
+            format: "flac".to_string(),
+            ..Default::default()
+        };
+        let merged = edits_with("Baru").merge(&base);
+        assert_eq!(merged.duration_ms, 123_456);
+        assert_eq!(merged.sample_rate, Some(192_000));
+        assert_eq!(merged.bit_depth, Some(24));
+        assert_eq!(merged.bitrate, Some(4_000));
+        assert_eq!(merged.format, "flac");
     }
 }

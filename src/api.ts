@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, Track } from "./types";
+import type { Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, TagEdits, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -138,6 +138,14 @@ export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {
 /** Lyrics for a track (embedded / `.lrc` sidecar), or `null` when absent. */
 export function getLyrics(path: string): Promise<Lyrics | null> {
   return invoke<Lyrics | null>("get_lyrics", { path });
+}
+
+/**
+ * Write tag edits to a track file (`.bak` backup is created first) and
+ * refresh its library row; resolves to the updated track (M4 slice 4).
+ */
+export function writeTags(path: string, edits: TagEdits): Promise<Track> {
+  return invoke<Track>("write_tags", { path, edits });
 }
 
 /** Toggle the always-on-top mini visualizer window (player-bar button). */

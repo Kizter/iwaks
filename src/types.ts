@@ -85,3 +85,18 @@ export interface Lyrics {
   timed: LyricsLine[];
   plain: string | null;
 }
+
+/**
+ * Mirrors iwaks_core::track::TagEdits (serde camelCase). Blank title removes
+ * the title tag; `null` fields remove those tags from the file.
+ */
+export interface TagEdits {
+  title: string;
+  artist: string | null;
+  album: string | null;
+  albumArtist: string | null;
+  genre: string | null;
+  year: number | null;
+  trackNo: number | null;
+  discNo: number | null;
+}

@@ -25,6 +25,7 @@ import {
   saveQueueAsPlaylist,
   scanFolder,
   searchTracks,
+  writeTags,
 } from "./api";
 import "./App.css";
 import { formatBadge, formatDuration, scanSummary } from "./format";
@@ -227,6 +228,17 @@ function CloseIcon() {
   );
 }
 
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+      <path
+        fill="currentColor"
+        d="M12.1 2.3a1.6 1.6 0 0 0-2.3 0L3.4 8.7 3 11l.3.9.9.3 2.3-.4 6.4-6.4a1.6 1.6 0 0 0 0-2.3zM5.4 10.3l5.6-5.6.9.9-5.6 5.6-1.2.2.3-1.1z"
+      />
+    </svg>
+  );
+}
+
 function TrackRow({
   track,
   top,
@@ -234,6 +246,7 @@ function TrackRow({
   onPlay,
   onAdd,
   onRemove,
+  onEdit,
 }: {
   track: Track;
   top: number;
@@ -241,6 +254,7 @@ function TrackRow({
   onPlay: () => void;
   onAdd?: (t: Track) => void;
   onRemove?: (t: Track) => void;
+  onEdit?: (t: Track) => void;
 }) {
   const artist = track.artist ?? "Unknown artist";
   const album = track.album ?? "";
@@ -296,6 +310,20 @@ function TrackRow({
             <CloseIcon />
           </button>
         )}
+        {onEdit && (
+          <button
+            type="button"
+            className="row-btn"
+            title="Edit tags"
+            aria-label={`Edit tags for ${track.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(track);
+            }}
+          >
+            <EditIcon />
+          </button>
+        )}
         <span className="track-badge">{formatBadge(track.format)}</span>
         <span className="track-dur">{formatDuration(track.durationMs)}</span>
       </span>
@@ -319,12 +347,14 @@ function TrackList({
   onPlay,
   onAdd,
   onRemove,
+  onEdit,
 }: {
   tracks: Track[];
   playingPath: string | null;
   onPlay: (index: number) => void;
   onAdd?: (t: Track) => void;
   onRemove?: (t: Track) => void;
+  onEdit?: (t: Track) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -357,6 +387,7 @@ function TrackList({
         onPlay={() => onPlay(i)}
         onAdd={onAdd}
         onRemove={onRemove}
+        onEdit={onEdit}
       />,
     );
   }
@@ -556,6 +587,7 @@ function FolderDetail({
   onOpen,
   onPlay,
   onAdd,
+  onEdit,
 }: {
   children: string[];
   stats: Map<string, FolderStat>;
@@ -565,6 +597,7 @@ function FolderDetail({
   onOpen: (dir: string) => void;
   onPlay: (index: number) => void;
   onAdd: (t: Track) => void;
+  onEdit?: (t: Track) => void;
 }) {
   return (
     <>
@@ -599,9 +632,177 @@ function FolderDetail({
       {tracks.length === 0 ? (
         <p className="scan-note">{noTracksNote}</p>
       ) : (
-        <TrackList tracks={tracks} playingPath={playingPath} onPlay={onPlay} onAdd={onAdd} />
+        <TrackList
+          tracks={tracks}
+          playingPath={playingPath}
+          onPlay={onPlay}
+          onAdd={onAdd}
+          onEdit={onEdit}
+        />
       )}
     </>
+  );
+}
+
+/** Trimmed value or `null` when blank (blank fields remove the tag). */
+function blankField(s: string): string | null {
+  const t = s.trim();
+  return t ? t : null;
+}
+
+/**
+ * Modal tag editor (M4 slice 4): edit the 8 core tag fields of one track.
+ * Saving writes the file via `write_tags` (a `.bak` backup is created first)
+ * and refreshes the library row; the dialog stays open on failure. Blank
+ * fields remove that tag from the file.
+ */
+function TagEditor({
+  track,
+  onCancel,
+  onSaved,
+}: {
+  track: Track;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(track.title);
+  const [artist, setArtist] = useState(track.artist ?? "");
+  const [album, setAlbum] = useState(track.album ?? "");
+  const [albumArtist, setAlbumArtist] = useState(track.albumArtist ?? "");
+  const [genre, setGenre] = useState(track.genre ?? "");
+  const [year, setYear] = useState(track.year?.toString() ?? "");
+  const [trackNo, setTrackNo] = useState(track.trackNo?.toString() ?? "");
+  const [discNo, setDiscNo] = useState(track.discNo?.toString() ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /** "" → `null` (removes the tag); malformed input → "invalid". */
+  const parseNum = (v: string): number | null | "invalid" => {
+    const t = v.trim();
+    if (!t) return null;
+    const n = Number(t);
+    return Number.isInteger(n) && n >= 0 ? n : "invalid";
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const y = parseNum(year);
+    const tn = parseNum(trackNo);
+    const dn = parseNum(discNo);
+    if (y === "invalid" || tn === "invalid" || dn === "invalid") {
+      setError("Year, track and disc numbers must be whole numbers.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await writeTags(track.path, {
+        title,
+        artist: blankField(artist),
+        album: blankField(album),
+        albumArtist: blankField(albumArtist),
+        genre: blankField(genre),
+        year: y,
+        trackNo: tn,
+        discNo: dn,
+      });
+      onSaved();
+    } catch (err) {
+      setError(`Couldn't save tags — ${String(err)}`);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="picker-backdrop" onClick={onCancel}>
+      <div
+        className="picker tag-editor"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit tags"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="tag-editor-title">Edit tags</h2>
+        <p className="tag-editor-path" title={track.path}>
+          {track.path}
+        </p>
+        <form onSubmit={submit}>
+          <div className="tag-grid">
+            <label className="tag-field tag-field-wide">
+              <span>Title</span>
+              <input
+                autoFocus
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                aria-label="Title"
+              />
+            </label>
+            <label className="tag-field">
+              <span>Artist</span>
+              <input value={artist} onChange={(e) => setArtist(e.target.value)} />
+            </label>
+            <label className="tag-field">
+              <span>Album</span>
+              <input value={album} onChange={(e) => setAlbum(e.target.value)} />
+            </label>
+            <label className="tag-field">
+              <span>Album artist</span>
+              <input value={albumArtist} onChange={(e) => setAlbumArtist(e.target.value)} />
+            </label>
+            <label className="tag-field">
+              <span>Genre</span>
+              <input value={genre} onChange={(e) => setGenre(e.target.value)} />
+            </label>
+          </div>
+          <div className="tag-nums">
+            <label className="tag-field">
+              <span>Year</span>
+              <input
+                inputMode="numeric"
+                placeholder="—"
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+              />
+            </label>
+            <label className="tag-field">
+              <span>Track #</span>
+              <input
+                inputMode="numeric"
+                placeholder="—"
+                value={trackNo}
+                onChange={(e) => setTrackNo(e.target.value)}
+              />
+            </label>
+            <label className="tag-field">
+              <span>Disc #</span>
+              <input
+                inputMode="numeric"
+                placeholder="—"
+                value={discNo}
+                onChange={(e) => setDiscNo(e.target.value)}
+              />
+            </label>
+          </div>
+          {error && (
+            <p className="tag-editor-error" role="alert">
+              {error}
+            </p>
+          )}
+          <p className="tag-editor-note">
+            A backup (<code>.bak</code>) of the original file is created before saving. Blank
+            fields remove that tag.
+          </p>
+          <div className="tag-editor-actions">
+            <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save tags"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -746,6 +947,8 @@ function App() {
   const [plDetail, setPlDetail] = useState<{ name: string; tracks: Track[] } | null>(null);
   // Track awaiting a playlist choice (the "+" button on a row).
   const [addTarget, setAddTarget] = useState<Track | null>(null);
+  // Track whose tags are being edited (the pencil button on a row).
+  const [editTarget, setEditTarget] = useState<Track | null>(null);
   const [plDraft, setPlDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -916,6 +1119,15 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [addTarget]);
+
+  useEffect(() => {
+    if (!editTarget) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEditTarget(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editTarget]);
 
   const refreshPlaylists = useCallback(async () => {
     try {
@@ -1571,6 +1783,7 @@ function App() {
             onOpen={(dir) => setView({ kind: "folder", key: dir })}
             onPlay={onPlay}
             onAdd={(t) => setAddTarget(t)}
+            onEdit={(t) => setEditTarget(t)}
           />
         ) : groupKind && groupTracks && groupTracks.length === 0 ? (
           <p className="scan-note">No tracks in this {groupKind} match your search.</p>
@@ -1580,6 +1793,7 @@ function App() {
             playingPath={playerState?.current?.path ?? null}
             onPlay={onPlay}
             onAdd={(t) => setAddTarget(t)}
+            onEdit={(t) => setEditTarget(t)}
           />
         )}
       </div>
@@ -1632,6 +1846,18 @@ function App() {
             </form>
           </div>
         </div>
+      )}
+
+      {editTarget && (
+        <TagEditor
+          track={editTarget}
+          onCancel={() => setEditTarget(null)}
+          onSaved={() => {
+            setEditTarget(null);
+            setRefreshKey((k) => k + 1);
+            if (view.kind === "playlist") void refreshPlaylists();
+          }}
+        />
       )}
     </Shell>
   );
