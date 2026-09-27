@@ -106,13 +106,19 @@ export function MiniPlayer() {
     const win = getCurrentWindow();
     const sf = await win.scaleFactor();
     const size = await win.outerSize();
-    const panel = document.querySelector(".mp-panel");
+    const panel = document.querySelector<HTMLElement>(".mp-panel");
+    // Measure the panel's full content height (offsetTop + scrollHeight) —
+    // getBoundingClientRect().bottom is unreliable here because the panel is
+    // an overflow-y:auto flex child that flex-shrinks inside the 160px
+    // window before we resize, so its rendered box is smaller than its
+    // content. offsetTop is relative to the fixed .mini-player root; add the
+    // panel's 8px top margin plus a small buffer.
     const target =
       visible && panel
-        ? Math.min(Math.ceil(panel.getBoundingClientRect().bottom + 10), 560)
+        ? Math.min(Math.ceil(panel.offsetTop + panel.scrollHeight + 18), 560)
         : BASE_HEIGHT;
     if (target !== size.height) {
-      await win.setSize(new LogicalSize(size.width / sf, target));
+      await win.setSize(new LogicalSize(size.width / sf, target)).catch(() => {});
     }
   };
 

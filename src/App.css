@@ -623,8 +623,8 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 20px;
-  padding: 10px 20px;
+  gap: 14px;
+  padding: 8px 14px;
   background: var(--surface);
   border-top: 1px solid var(--line);
   box-shadow: 0 -6px 16px rgba(38, 64, 92, 0.05);
@@ -681,7 +681,8 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  width: min(460px, 42vw);
+  width: min(430px, 40vw);
+  min-width: 0;
 }
 
 .pb-controls {
@@ -1231,7 +1232,8 @@ input[type="range"].eq-slider::-moz-range-thumb {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   min-width: 0;
 }
 
@@ -1251,7 +1253,8 @@ input[type="range"].seek {
 }
 
 input[type="range"].vol {
-  width: 96px;
+  width: 84px;
+  flex: 0 0 auto;
 }
 
 input[type="range"]::-webkit-slider-thumb {
@@ -1693,4 +1696,56 @@ input[type="range"]:disabled {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* ---------- player bar responsive (M4 pasca-uji fix) ----------
+   The right tool strip is ~10 controls wide (~500px) and used to overflow
+   its 1fr grid track when the window was narrower than ~100%, so icons
+   collided with the transport column. Now:
+   - .pb-right wraps instead of overflowing (never overlaps),
+   - rarely-used controls drop out at narrower widths,
+   - below 920px the bar collapses to two rows: transport on top, the tool
+     strip full-width underneath. */
+
+@media (max-width: 1160px) {
+  .player-bar {
+    gap: 10px;
+    padding: 8px 10px;
+  }
+  .pb-center {
+    width: min(400px, 38vw);
+  }
+  input[type="range"].vol {
+    width: 64px;
+  }
+  .dice-btn {
+    display: none;
+  }
+  .sleep-count {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .player-bar {
+    grid-template-rows: auto auto;
+  }
+  .pb-left {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .pb-center {
+    grid-column: 2;
+    grid-row: 1;
+    width: min(430px, 52vw);
+    justify-self: center;
+  }
+  .pb-right {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: center;
+  }
+  .pb-art {
+    display: none;
+  }
 }
