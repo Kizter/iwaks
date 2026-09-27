@@ -2,10 +2,10 @@
 // Player state arrives through the same app-wide `player-state` events, so
 // the mini window mirrors the main player: play/pause, prev/next, shuffle,
 // plus a playlist/queue picker. The whole surface is a drag region — grab
-// anywhere to move the frameless window.
+// anywhere to move the frameless window. The picker is an OVERLAY inside the
+// fixed-size window (the window never resizes; the list scrolls within it).
 
 import { useEffect, useRef, useState } from "react";
-import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ListBullets,
@@ -39,36 +39,6 @@ export function MiniPlayer() {
   // Label of the last source chosen here (playlist name or "Queue").
   const [source, setSource] = useState("Playlist");
   const unlistenRef = useRef<(() => void) | null>(null);
-
-  // Base window height (opened via `open_mini_window`). The playlist picker
-  // is a panel at the BOTTOM of the window, so the window grows while it is
-  // open (height measured from the panel's actual rendered position) and
-  // shrinks back when it closes. Width is left untouched.
-  const BASE_HEIGHT = 160;
-
-  const fitPicker = async (visible: boolean) => {
-    if (visible) {
-      // Let React commit the panel first so its height can be measured.
-      await new Promise((r) => setTimeout(r, 0));
-    }
-    const win = getCurrentWindow();
-    const sf = await win.scaleFactor();
-    const size = await win.outerSize();
-    const panel = document.querySelector<HTMLElement>(".mp-panel");
-    // Measure the panel's full content height (offsetTop + scrollHeight) —
-    // getBoundingClientRect().bottom is unreliable here because the panel is
-    // an overflow-y:auto flex child that flex-shrinks inside the 160px
-    // window before we resize, so its rendered box is smaller than its
-    // content. offsetTop is relative to the fixed .mini-player root; add the
-    // panel's 8px top margin plus a small buffer.
-    const target =
-      visible && panel
-        ? Math.min(Math.ceil(panel.offsetTop + panel.scrollHeight + 18), 560)
-        : BASE_HEIGHT;
-    if (target !== size.height) {
-      await win.setSize(new LogicalSize(size.width / sf, target)).catch(() => {});
-    }
-  };
 
   useEffect(() => {
     let alive = true;
@@ -104,17 +74,14 @@ export function MiniPlayer() {
         setPlaylists([]);
       }
       setPickerOpen(true);
-      void fitPicker(true);
     } else {
       setPickerOpen(false);
-      void fitPicker(false);
     }
   };
 
   const playSource = async (tracks: Track[], label: string) => {
     if (tracks.length === 0) return;
     setPickerOpen(false);
-    void fitPicker(false);
     await playTracks(tracks, 0);
     setSource(label);
   };
@@ -233,36 +200,50 @@ export function MiniPlayer() {
       </div>
 
       {pickerOpen && (
-        <div className="mp-panel" role="listbox" aria-label="Choose what to play">
-          <button
-            type="button"
-            role="option"
-            aria-selected={source === "Queue"}
-            className={`mp-panel-item${source === "Queue" ? " on" : ""}`}
-            onClick={() => void playQueue()}
-          >
-            <QueueIcon size={16} className="mp-panel-ico" aria-hidden="true" />
-            <span className="mp-panel-name">Queue (session)</span>
-          </button>
-          {(playlists ?? []).map((p) => (
+        <div className="mp-panel" aria-label="Choose what to play">
+          <div className="mp-panel-head">
+            <span className="mp-panel-title">Choose what to play</span>
             <button
-              key={p.id}
+              type="button"
+              className="mp-panel-close"
+              onClick={() => setPickerOpen(false)}
+              aria-label="Close picker"
+              title="Close"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="mp-panel-list" role="listbox" aria-label="Pick a source">
+            <button
               type="button"
               role="option"
-              aria-selected={source === p.name}
-              className={`mp-panel-item${source === p.name ? " on" : ""}`}
-              onClick={() => void playPlaylist(p.id, p.name)}
+              aria-selected={source === "Queue"}
+              className={`mp-panel-item${source === "Queue" ? " on" : ""}`}
+              onClick={() => void playQueue()}
             >
-              <ListBullets size={16} className="mp-panel-ico" aria-hidden="true" />
-              <span className="mp-panel-name">{p.name}</span>
-              <span className="mp-panel-count">{p.trackCount}</span>
+              <QueueIcon size={16} className="mp-panel-ico" aria-hidden="true" />
+              <span className="mp-panel-name">Queue (session)</span>
             </button>
-          ))}
-          {(playlists?.length ?? 0) === 0 && (
-            <p className="mp-panel-empty">
-              No playlists yet — create one in the main window.
-            </p>
-          )}
+            {(playlists ?? []).map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="option"
+                aria-selected={source === p.name}
+                className={`mp-panel-item${source === p.name ? " on" : ""}`}
+                onClick={() => void playPlaylist(p.id, p.name)}
+              >
+                <ListBullets size={16} className="mp-panel-ico" aria-hidden="true" />
+                <span className="mp-panel-name">{p.name}</span>
+                <span className="mp-panel-count">{p.trackCount}</span>
+              </button>
+            ))}
+            {(playlists?.length ?? 0) === 0 && (
+              <p className="mp-panel-empty">
+                No playlists yet — create one in the main window.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
