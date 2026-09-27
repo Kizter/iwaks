@@ -31,12 +31,12 @@ jobs:
       - name: cargo fmt (workspace)
         run: cargo fmt --all -- --check
 
-      - name: cargo clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Fetch libmpv (headless player tests)
+      - name: Fetch libmpv (tauri resource + headless player tests)
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-libmpv.ps1
+
+      - name: cargo clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test (workspace)
         env:
