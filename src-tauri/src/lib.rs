@@ -53,62 +53,6 @@ fn now_playing(s: &PlayerState) -> NowPlaying {
     }
 }
 
-/// Push the current track's embedded cover art to the SMTC session, but only
-/// when the track changes. The tag read runs on a background thread so the
-/// player pump (which calls this every ~tick) never blocks on file I/O; a
-/// superseded read is dropped once a newer track took over.
-fn sync_smtc_cover(
-    session: &Option<SmtcSession>,
-    last_key: &Arc<Mutex<Option<String>>>,
-    s: &PlayerState,
-) {
-    let Some(session) = session else {
-        return;
-    };
-    let path = s
-        .current
-        .as_ref()
-        .filter(|_| !s.stopped)
-        .map(|t| t.path.as_str());
-    match path {
-        Some(path) => {
-            let mut key = last_key.lock().unwrap();
-            if key.as_deref() == Some(path) {
-                return; // same track — cover already applied
-            }
-            *key = Some(path.to_string());
-        }
-        None => {
-            // Stopped / nothing loaded: forget the key so a re-play of the
-            // same file re-pushes its cover, then clear the thumbnail.
-            last_key.lock().unwrap().take();
-        }
-    }
-
-    let Some(path) = path else {
-        session.set_cover(None);
-        return;
-    };
-
-    let session = session.clone();
-    let last_key = Arc::clone(last_key);
-    let owned_path = path.to_string();
-    std::thread::spawn(move || {
-        let cover = iwaks_tags::cover::read_cover(std::path::Path::new(&owned_path))
-            .ok()
-            .flatten()
-            .map(|c| c.data.into_boxed_slice());
-        // Drop the result when a newer track already took over the key.
-        let still_current = last_key
-            .lock()
-            .map(|k| k.as_deref() == Some(owned_path.as_str()))
-            .unwrap_or(false);
-        if still_current {
-            session.set_cover(cover);
-        }
-    });
-}
-
 fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
 }
@@ -604,8 +548,6 @@ pub fn run() {
             // flyout discover Iwaks. `None` on non-Windows / WinRT failure.
             let smtc = SmtcSession::start();
             let smtc_for_sink = smtc.clone();
-            let cover_key = Arc::new(Mutex::new(None::<String>));
-            let cover_key_for_sink = Arc::clone(&cover_key);
             let player = match Player::start(
                 &PlayerOptions::default(),
                 Box::new(move |s: &PlayerState| {
@@ -613,7 +555,6 @@ pub fn run() {
                     if let Some(session) = &smtc_for_sink {
                         session.update(&now_playing(s));
                     }
-                    sync_smtc_cover(&smtc_for_sink, &cover_key_for_sink, s);
                 }),
             ) {
                 Ok(p) => Some(p),
@@ -623,22 +564,6 @@ pub fn run() {
                     None
                 }
             };
-
-            // Music Presence (Discord status) is a separate tray app; start it
-            // together with Iwaks when an installation is detected. Runs off
-            // the main thread so startup never blocks on registry I/O.
-            std::thread::spawn(|| match iwaks_smtc::launch::find_installation() {
-                Some(exe) => match iwaks_smtc::launch::spawn(&exe) {
-                    Ok(_) => {
-                        eprintln!("Music Presence auto-started: {}", exe.display())
-                    }
-                    Err(e) => eprintln!("Music Presence at {} failed to start: {e}", exe.display()),
-                },
-                None => eprintln!(
-                    "Music Presence not installed — Discord status via \
-                         SMTC still works, but no auto-start"
-                ),
-            });
 
             // Media keys / flyout buttons drive the live player. Pause-forces
             // only when playing and vice-versa (toggle alone would invert a

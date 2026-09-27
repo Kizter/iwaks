@@ -6,24 +6,19 @@
 //! through SMTC — and libmpv never registers one, so Iwaks wouldn't appear
 //! anywhere. This crate publishes a tiny WinRT `MediaPlayer` (silent source,
 //! volume 0, never actually played) purely as a metadata + timeline +
-//! playback-status + album-art surface for the OS. Once Music Presence is
-//! installed it picks "Iwaks" up automatically, no per-player configuration
-//! needed; [`launch`] also locates and starts that installation alongside
-//! the app.
+//! playback-status surface for the OS. Once Music Presence is installed it
+//! picks "Iwaks" up automatically, no per-player configuration needed.
 //!
 //! Threading: **every WinRT call stays on one dedicated thread** (the session
 //! thread). The rest of the app only pushes [`NowPlaying`] snapshots over a
-//! channel (the player already emits ~10 Hz while playing), hands the raw
-//! embedded cover bytes over the same channel whenever the track changes, and
-//! registers a callback for media-key / flyout button presses. That keeps the
-//! handle `Send + Sync` so Tauri can store it in managed state.
+//! channel (the player already emits ~10 Hz while playing) and registers a
+//! callback for media-key / flyout button presses. That keeps the handle
+//! `Send + Sync` so Tauri can store it in managed state.
 //!
 //! On non-Windows targets [`SmtcSession::start`] returns `None` and the other
 //! methods are no-ops.
 
 mod win;
-
-pub mod launch;
 
 pub use win::SmtcSession;
 
@@ -133,24 +128,6 @@ pub fn silent_wav(seconds: u32) -> Vec<u8> {
     wav
 }
 
-/// Map raw cover bytes to the extension of the thumbnail temp file. Sniffs
-/// magic bytes (JPEG/PNG/GIF/WebP); anything else falls back to `bin` — WIC
-/// and most decoders sniff content, so the extension is mostly cosmetic and
-/// only needs to stay stable across covers.
-pub(crate) fn cover_extension(bytes: &[u8]) -> &'static str {
-    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        "jpg"
-    } else if bytes.starts_with(b"\x89PNG") {
-        "png"
-    } else if bytes.starts_with(b"GIF8") {
-        "gif"
-    } else if bytes.starts_with(b"RIFF") && bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
-        "webp"
-    } else {
-        "bin"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,16 +216,5 @@ mod tests {
         assert_eq!(data_len, 8_000 * 2 * 2); // 8 kHz, mono, 16-bit, 2 s
                                              // Audio payload is pure silence.
         assert!(wav[44..].iter().all(|b| *b == 0));
-    }
-
-    #[test]
-    fn cover_extension_sniffs_magic_bytes() {
-        assert_eq!(cover_extension(&[0xFF, 0xD8, 0xFF, 0xE0]), "jpg");
-        assert_eq!(cover_extension(b"\x89PNG\r\n\x1a\n"), "png");
-        assert_eq!(cover_extension(b"GIF89a"), "gif");
-        assert_eq!(cover_extension(b"RIFF....WEBPVP8 "), "webp");
-        assert_eq!(cover_extension(b"RIFF"), "bin"); // truncated webp header
-        assert_eq!(cover_extension(b"not an image"), "bin");
-        assert_eq!(cover_extension(&[]), "bin");
     }
 }
