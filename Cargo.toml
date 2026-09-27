@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/core", "crates/library", "crates/tags", "crates/player", "crates/smtc"]
+members = ["src-tauri", "crates/core", "crates/library", "crates/tags", "crates/player"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,7 +11,6 @@ license = "MIT"
 iwaks-core = { path = "crates/core" }
 iwaks-library = { path = "crates/library" }
 iwaks-tags = { path = "crates/tags" }
-iwaks-smtc = { path = "crates/smtc" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 lofty = "0.22"
