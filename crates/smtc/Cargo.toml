@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 
 [target.'cfg(windows)'.dependencies]
+winreg = "0.56"
 windows = { version = "0.62", default-features = false, features = [
     "Foundation",
     "Media",

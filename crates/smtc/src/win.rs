@@ -21,6 +21,7 @@ pub mod imp {
         SystemMediaTransportControlsButton, SystemMediaTransportControlsButtonPressedEventArgs,
         SystemMediaTransportControlsTimelineProperties,
     };
+    use windows::Storage::Streams::RandomAccessStreamReference;
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
     use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
 
@@ -28,6 +29,7 @@ pub mod imp {
 
     enum Msg {
         Update(Box<NowPlaying>),
+        Cover(Option<Box<[u8]>>),
     }
 
     /// Handle to the SMTC session thread. Cheap to clone; `Send + Sync`
@@ -42,6 +44,11 @@ pub mod imp {
     struct Core {
         _player: MediaPlayer,
         smtc: SystemMediaTransportControls,
+        /// Current thumbnail source; `None` = no cover (clears the flyout).
+        thumbnail: Option<RandomAccessStreamReference>,
+        /// Last cover bytes applied — skips rewriting the temp file when the
+        /// same cover (e.g. same album) is pushed again.
+        last_cover: Option<Box<[u8]>>,
     }
 
     impl SmtcSession {
@@ -65,6 +72,13 @@ pub mod imp {
             let _ = self.tx.send(Msg::Update(Box::new(np.clone())));
         }
 
+        /// Push the current track's embedded cover art (raw image bytes).
+        /// `None` clears the thumbnail. The app should call this once per
+        /// track change; identical bytes are skipped on the session thread.
+        pub fn set_cover(&self, cover: Option<Box<[u8]>>) {
+            let _ = self.tx.send(Msg::Cover(cover));
+        }
+
         /// Replace the callback invoked when the user presses a media key or
         /// a flyout button (play / pause / next / previous / stop).
         pub fn on_button(&self, f: Box<ButtonFn>) {
@@ -80,12 +94,13 @@ pub mod imp {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let _ = RoInitialize(RO_INIT_MULTITHREADED);
         }
-        let Some(core) = build_core(handler) else {
+        let Some(mut core) = build_core(handler) else {
             return;
         };
         while let Ok(msg) = rx.recv() {
             match msg {
                 Msg::Update(np) => apply(&core, &np),
+                Msg::Cover(cover) => set_cover(&mut core, cover),
             }
         }
     }
@@ -133,6 +148,8 @@ pub mod imp {
         Some(Core {
             _player: player,
             smtc,
+            thumbnail: None,
+            last_cover: None,
         })
     }
 
@@ -144,6 +161,31 @@ pub mod imp {
         let file_uri = format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
         let uri = Uri::CreateUri(&HSTRING::from(file_uri)).ok()?;
         windows::Media::Core::MediaSource::CreateFromUri(&uri).ok()
+    }
+
+    /// Apply a new cover to the session: skip when bytes are unchanged (same
+    /// album across tracks), otherwise write a fresh temp file and rebuild
+    /// the stream reference. `None` clears the thumbnail.
+    fn set_cover(core: &mut Core, cover: Option<Box<[u8]>>) {
+        if cover == core.last_cover {
+            return;
+        }
+        core.last_cover = cover;
+        core.thumbnail = match &core.last_cover {
+            Some(bytes) => thumbnail_from_bytes(bytes),
+            None => None,
+        };
+    }
+
+    /// Write the cover to the temp dir as a `file:` URI source and wrap it
+    /// in a stream reference — synchronous, mirroring the silent-WAV trick.
+    fn thumbnail_from_bytes(bytes: &[u8]) -> Option<RandomAccessStreamReference> {
+        let ext = crate::cover_extension(bytes);
+        let path = std::env::temp_dir().join(format!("iwaks-smtc-cover.{ext}"));
+        std::fs::write(&path, bytes).ok()?;
+        let file_uri = format!("file:///{}", path.to_string_lossy().replace('\\', "/"));
+        let uri = Uri::CreateUri(&HSTRING::from(file_uri)).ok()?;
+        RandomAccessStreamReference::CreateFromUri(&uri).ok()
     }
 
     fn apply(core: &Core, np: &NowPlaying) {
@@ -167,6 +209,7 @@ pub mod imp {
             props.SetTitle(&h_title)?;
             props.SetArtist(&h_artist)?;
             props.SetAlbumTitle(&h_album)?;
+            updater.SetThumbnail(core.thumbnail.as_ref())?;
             updater.Update()?;
             // Timeline = the progress bar the flyout / Music Presence draws.
             let end = TimeSpan {
@@ -200,6 +243,7 @@ pub mod imp {
             None
         }
         pub fn update(&self, _np: &NowPlaying) {}
+        pub fn set_cover(&self, _cover: Option<Box<[u8]>>) {}
         pub fn on_button(&self, _f: Box<dyn Fn(SmtcButton) + Send + Sync>) {}
     }
 }
