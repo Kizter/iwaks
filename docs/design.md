@@ -12,8 +12,8 @@
 3. **Untuk siapa:** Pemakaian pribadi, lalu dibagikan publik via GitHub (open source, bisa di-install orang lain).
 4. **Kendala:** Windows saja • Tauri v2 + Rust • libmpv → WASAPI • SQLite (skala medium 1.000–20.000 lagu).
 5. **Format audio:** Semua — FLAC/WAV/ALAC, MP3/AAC/OGG/Opus, WavPack/AIFF/WMA Lossless, DSD (DSF/DFF).
-6. **Fitur inti:** Scanner folder + metadata tag, pencarian + filter, playlist + queue, EQ, gapless + crossfade + ReplayGain, sleep timer + playback speed, visualizer, lirik, tag editor, folder browse, casting (DLNA → Chromecast; Bluetooth post-v1).
-7. **Non-goals:** Tanpa streaming/online (aplikasi offline murni), tanpa remote control jarak jauh.
+6. **Fitur inti:** Scanner folder + metadata tag, pencarian + filter, playlist + queue, EQ, gapless + crossfade + ReplayGain, sleep timer + playback speed, lirik, tag editor, folder browse, mini player. Casting (DLNA → Chromecast) kini **post-v1** (Amendemen M5); Bluetooth post-v1 (D16).
+7. **Non-goals:** Tanpa streaming/online (aplikasi offline murni), tanpa remote control jarak jauh, tanpa casting v1 (DLNA/Chromecast — keputusan M5), tanpa dark mode (dicatat follow-up).
 
 ## 2. Assumptions
 
@@ -26,7 +26,7 @@
 | A5 | Lisensi GitHub: MIT |
 | A6 | Reliability: file corrupt/format aneh → skip + warning, tidak pernah crash |
 | A7 | libmpv di-bundle sebagai `libmpv-2.dll` untuk Windows (supplied binary) |
-| A8 | Urutan casting v1: **DLNA dulu → Chromecast menyusul** dalam siklus v1; Bluetooth post-v1 |
+| A8 | Urutan casting post-v1: **DLNA dulu → Chromecast menyusul** — keduanya **ditunda ke post-v1** (keputusan evaluasi M5, Amendemen M5); tidak ada kebutuhan untuk pemakaian pribadi |
 
 ## 3. Decision Log
 
@@ -43,7 +43,7 @@
 | D9 | libmpv engine | Pure Rust decode | Semua format + DSD, matang |
 | D10 | Pendekatan A: modular monolith | B (thin frontend), C (proses terpisah) | Scope besar, satu binary |
 | D11 | SQLite (rusqlite) | JSON / Postgres | Skala medium |
-| D12 | Casting: BT+DLNA dulu, Chromecast menyusul | casting penuh sekaligus | Risiko teknis |
+| D12 | Casting: BT+DLNA dulu, Chromecast menyusul (**kini post-v1**, Amendemen M5) | casting penuh sekaligus | Risiko teknis |
 | D13 | Skill frontend: impeccable, ui-ux-pro-max, apple-design, design-taste-frontend, accessibility, anti-ui-slop | — | Per user |
 | D14 | Skill backend: tailwind-patterns, typescript-expert, backend-architect, tauri-v2 (+ rust-architect opsional) | — | Per user |
 | D15 | Skill saat kerja: clean-code, ponytail, performance-optimizer, benchmark | — | Per user |
@@ -138,10 +138,11 @@ playlist_tracks(playlist_id, track_id, position)
 
 ### 4.5 Casting
 
-- **DLNA (v1):** discovery SSDP → app sebagai MediaServer (HTTP) + Control Point; push stream + kontrol AVTransport; view Cast daftar renderer.
-- **Chromecast (v1 lanjutan):** CASTV2 (mDNS + protobuf), mirror logika kontrol.
+- **DLNA:** discovery SSDP → app sebagai MediaServer (HTTP) + Control Point; push stream + kontrol AVTransport; view Cast daftar renderer.
+- **Chromecast:** CASTV2 (mDNS + protobuf), mirror logika kontrol.
 - **Bluetooth: post-v1 (D16).**
 - Satu trait `CastTarget` → UI sama untuk semua target.
+- **Amendemen M5 (release v0.1.0 — casting seluruhnya ditunda post-v1):** evaluasi M5 (brainstorming + keputusan user) menetapkan definisi ship = **pemakaian pribadi**. Casting DLNA + Chromecast **tidak dikerjakan di v1** — tidak ada kebutuhan nyata (1 pengguna, 1 mesin, offline penuh), dan dua protokol (SOAP/UPnP + CASTV2 protobuf) adalah risiko terbesar di roadmap dengan imbal hasil nol untuk pemakaian tunggal. Trait `CastTarget` tetap rencana desain (D12), dieksekusi bila kebutuhan muncul. M5 diisi oleh **release v1**: installer NSIS (`tauri build`, `bundle.targets: all` → NSIS otomatis), tag `v0.1.0`, README/docs release, perbaikan konsistensi window `backgroundColor` (`#f4f6ea` → `#f3ede4` = `--bg`).
 
 ### 4.6 Error Handling & Reliability
 
@@ -168,11 +169,11 @@ playlist_tracks(playlist_id, track_id, position)
 | M2 | `player` libmpv (pump single-thread) + player bar | Play/pause/seek/volume/next/prev + bar |
 | M3 | EQ, ReplayGain, sleep timer, speed, visualizer, lirik | Slice 1 (speed + sleep timer) ✅, Slice 2 (EQ + ReplayGain) ✅, Slice 3 (lirik) ✅, Slice 4 (visualizer generatif + mini window) ✅ — **M3 lengkap**; batch post-M3: shared-WASAPI default, add files/folder, shuffle + reshuffle, nav Albums/Artists/Folders (Amendemen M3 slice 5–8) ✅ |
 | M4 | Playlist + queue + folder browse + tag editor | Slice 1 (playlist + m3u import/export) ✅, Slice 2 (queue: view + drag-reorder + save-as-playlist) ✅, Slice 3 (folder browse: root grid + drill-down + breadcrumb) ✅, Slice 4 (tag editor: modal 8 field + backup `.bak`) ✅, Slice 5 (mini player: kontrol + drag + ganti playlist) ✅, Slice 6 (hapus visualizer + ikon flat + menu UI/UX) ✅, Slice 7 (UI/UX overhaul: palet warm pastel-muted + monokrom, sidebar/toolbar/mini player polish, motion pass) ✅ — **M4 lengkap** |
-| M5 | Casting DLNA → Chromecast + NSIS installer + README GitHub | Rilis v1 |
+| M5 | Release v1: NSIS installer + tag `v0.1.0` + README/docs release (casting DLNA → Chromecast **ditunda post-v1** — Amendemen M5) | Rilis v1 ✅ |
 
 ## 5. Risiko Kunci
 
-- **Casting**: implementasi UPnP/DLNA (SOAP) dan CASTV2 dari nol di Rust — paling berisiko; dimitigasi dengan memulai DLNA dulu, trait terisolasi.
+- **Casting**: implementasi UPnP/DLNA (SOAP) dan CASTV2 dari nol di Rust — paling berisiko; **ditunda post-v1** (keputusan evaluasi M5, Amendemen M5); bila dikerjakan: mulai DLNA dulu, trait terisolasi.
 - **Visualizer**: dihapus di M4 slice 6 (lihat Amendemen M4 slice 6) — risiko decode/FFT tidak relevan lagi.
 - **DSD**: perilaku tergantung device (native vs PCM fallback) — perlu pengujian perangkat nyata.
 - **WASAPI exclusive**: koneksi bisa "hilang" saat device diputus — perlu listener device.
