@@ -28,7 +28,7 @@ npm run tauri build
 Each release ships a `*.sha256` file next to the installer to verify the download:
 
 ```powershell
-Get-FileHash .\Iwaks_0.1.0_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\Iwaks_0.1.1_x64-setup.exe -Algorithm SHA256
 ```
 
 > [!NOTE]

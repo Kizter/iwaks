@@ -4,8 +4,10 @@
 //!
 //! DLL resolution order ([`Mpv::load_library`]):
 //!   1. `IWAKS_LIBMPV` env var (explicit path — CI/tests)
-//!   2. `libmpv-2.dll` / `mpv-2.dll` (next to exe or on `PATH`)
-//!   3. `resources\libmpv-2.dll` (Tauri bundles resources here)
+//!   2. `<exe-dir>\libmpv\libmpv-2.dll` — Tauri v2 keeps `bundle.resources`
+//!      next to the executable, preserving the declared subpath
+//!   3. `<exe-dir>\libmpv-2.dll` then bare `libmpv-2.dll` / `mpv-2.dll`
+//!      (flat next to the exe or on `PATH` — covers dev builds)
 //!   4. `libmpv.dll` / `libmpv.so.2` (non-Windows fallback)
 //!
 //! Only the client calls Iwaks needs are bound. `mpv_wait_event` returns a
@@ -145,17 +147,27 @@ impl Mpv {
                     .map_err(|e| format!("IWAKS_LIBMPV ({path}): {e}"));
             }
         }
-        const CANDIDATES: [&str; 6] = [
-            "libmpv-2.dll",
-            "mpv-2.dll",
-            "resources\\libmpv\\libmpv-2.dll",
-            "resources\\libmpv-2.dll",
-            "libmpv.dll",
-            "libmpv.so.2",
-        ];
-        for name in CANDIDATES {
+
+        // Absolute candidates anchored at the executable's directory. Tauri v2
+        // places `bundle.resources` next to the exe, preserving the declared
+        // subpath (`src-tauri/tauri.conf.json` → `libmpv/libmpv-2.dll`), so a
+        // plain DLL name alone can never find it once installed.
+        let mut candidates: Vec<std::ffi::OsString> = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                candidates.push(dir.join("libmpv").join("libmpv-2.dll").into_os_string());
+                candidates.push(dir.join("libmpv-2.dll").into_os_string());
+            }
+        }
+        // Fallbacks: bare names resolve through Windows' standard DLL search
+        // order (app dir, then PATH), which covers running from the project
+        // tree where the DLL sits flat next to the exe.
+        for name in ["libmpv-2.dll", "mpv-2.dll", "libmpv.dll", "libmpv.so.2"] {
+            candidates.push(name.into());
+        }
+        for path in &candidates {
             // SAFETY: same rationale as above — libmpv is loaded at runtime.
-            if let Ok(lib) = unsafe { Library::new(name) } {
+            if let Ok(lib) = unsafe { Library::new(path) } {
                 return Ok(lib);
             }
         }
