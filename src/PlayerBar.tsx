@@ -135,9 +135,10 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
     const box = lyricBox.current;
     const el = activeLine.current;
     if (box && el) {
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       box.scrollTo({
         top: Math.max(0, el.offsetTop - box.clientHeight / 2),
-        behavior: "smooth",
+        behavior: reduce ? "auto" : "smooth",
       });
     }
   }, [activeIdx]);

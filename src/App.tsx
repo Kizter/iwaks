@@ -34,6 +34,7 @@ import PlayerBar from "./PlayerBar";
 import {
   Folder,
   ListBullets,
+  MagnifyingGlass,
   MusicNote,
   Queue as QueueIcon,
   UserCircle,
@@ -908,6 +909,7 @@ function Shell({
           <img className="brand-mark" src={iwaksMark} alt="" />
           <span className="brand-name">Iwaks</span>
         </div>
+        <p className="sidebar-label">Library</p>
         <nav className="nav" aria-label="Library">
           {NAV_ITEMS.map((item) => {
             const active = home === item.id;
@@ -931,7 +933,7 @@ function Shell({
           })}
         </nav>
       </aside>
-      <section className="main">{children}</section>
+      <section className="main" aria-label="Library content">{children}</section>
       <PlayerBar state={playerState} />
     </main>
   );
@@ -1488,6 +1490,7 @@ function App() {
         <div className="toolbar-actions">
           <label className="search">
             <span className="visually-hidden">Search your library</span>
+            <MagnifyingGlass className="search-ico" size={16} aria-hidden="true" />
             <input
               type="search"
               placeholder="Search songs, artists, albums…"
@@ -1583,7 +1586,7 @@ function App() {
       {scanning && scanProg && (
         <div className="progress" role="status" aria-label="Scanning your music folder">
           <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+            <div className="progress-fill" style={{ transform: `scaleX(${progressPct / 100})` }} />
           </div>
           <span className="progress-label">
             Scanning… {scanProg.scanned.toLocaleString()}

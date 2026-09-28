@@ -38,7 +38,7 @@
 | D4 | EQ + gapless/crossfade/ReplayGain + sleep timer/speed | resampler terpisah | Per user; resampler = A1 |
 | D5 | Scanner+tag, search+filter, playlist+queue | — | Per user |
 | D6 | Tag editor + folder browse masuk scope v1 | non-goal | Koreksi user |
-| D7 | Dark modern ala Poweramp → **final: terang krem + tinta biru** (konsep sketsa user) | minimalis / klasik | Pilihan user; dikunci lewat konsep gambar |
+| D7 | Dark modern ala Poweramp → **final: terang krem + tinta biru** (konsep sketsa user) → **UI/UX overhaul post-M4: warm pastel-muted (parchment + dusty rosewood) + sentuhan monokrom** | minimalis / klasik | Pilihan user; dikunci lewat konsep gambar; palet dirombak M4 slice 7 |
 | D8 | Tauri v2 + Rust | Electron, C# | Ringan, WASAPI, ekosistem |
 | D9 | libmpv engine | Pure Rust decode | Semua format + DSD, matang |
 | D10 | Pendekatan A: modular monolith | B (thin frontend), C (proses terpisah) | Scope besar, satu binary |
@@ -48,7 +48,7 @@
 | D14 | Skill backend: tailwind-patterns, typescript-expert, backend-architect, tauri-v2 (+ rust-architect opsional) | — | Per user |
 | D15 | Skill saat kerja: clean-code, ponytail, performance-optimizer, benchmark | — | Per user |
 | D16 | **Bluetooth ditunda post-v1** | — | Koreksi user |
-| D17 | **Branding: nama "Iwaks", maskot ikan koi+caset, tema terang krem+biru** | — | Konsep user (D7 diubah) |
+| D17 | **Branding: nama "Iwaks", maskot ikan koi+caset, tema terang krem+biru** → **overhaul: warm pastel-muted + dusty rosewood** | — | Konsep user (D7 diubah); rebrand palet M4 slice 7 |
 
 ## 4. Final Design
 
@@ -123,6 +123,7 @@ playlist_tracks(playlist_id, track_id, position)
 - **M4 (penyelarasan mini player dengan UI/UX utama):** mini player yang semula bergaya gelap navy dirombak agar satu bahasa visual dengan window utama: latar `var(--bg)` (krem), teks `--text`/`--text-dim`, tombol kontrol mengikuti pola persis `.icon-btn` player bar (transparan, hover `--mint`+`--ink`, `:active` scale 0.94, disabled 0.4), tombol play `--ink` + ikon putih seperti `.play-main`, tombol sumber jadi pill (`--surface` + border `--line`, hover `--mint`); panel playlist memakai bahasa popover utama (`--surface`, border `--line`, radius 12, shadow, animasi `pop-in` 140ms). **Ikon:** seluruh SVG hand-rolled mini diganti `@phosphor-icons/react` flat (X, Play, Pause, SkipBack, SkipForward, Shuffle, Queue, ListBullets) — family sama dengan player bar; **baris queue & playlist di panel kini berikon** (Queue untuk "Queue (session)", ListBullets per playlist; baris aktif `--ink` + bg `--ice`), tombol sumber menampilkan ikon sesuai sumber aktif (Queue/ListBullets). `prefers-reduced-motion` diperluas ke kontrol & panel mini. Murni frontend — tanpa kode/command Rust baru, tanpa test Rust baru.
 - **M4 (perbaikan pasca-uji — window mini tetap ukuran):** user menolak perilaku auto-grow — tiap klik playlist/queue window mini memanjang lalu menyusut. Perbaikan: **logika `setSize`/`fitPicker` dihapus total** (import `LogicalSize` ikut dibuang); window mini sekarang **selalu tetap** (320×160, tidak pernah berubah ukuran). Picker playlist/queue berubah dari panel bawah + grow menjadi **overlay kartu** (`position:absolute; inset:6px; z-index:20`) yang menutupi isi mini selama terbuka — header "Choose what to play" + tombol ✕, daftar sumber discroll di dalam kartu (`flex:1; overflow-y:auto`). Perilaku tetap: klik baris memutar + menutup, sumber aktif ditandai, drag di mana saja tidak berubah. Murni frontend — tanpa kode/command Rust baru, tanpa test Rust baru.
 - **M4 (perbaikan — maskot baru):** artwork maskot diganti PNG sumber baru (1600×1600, dari user): `src/assets/iwaks-mark.png` (mark di header player bar + empty state library) dan **seluruh `src-tauri/icons` diregen** via `tauri icon` (window/taskbar: `icon.ico`/`icon.png`, Store: `Square*Logo`/`StoreLogo`, macOS `icon.icns`); folder `android/`/`ios/` yang ikut dihasilkan `tauri icon` **dihapus** (app Windows-only, tidak direferensikan). Murni aset/ikon — tanpa perubahan kode Rust/frontend logic, tanpa test baru.
+- **Amendemen M4 (slice 7 — UI/UX overhaul, satu pass):** palet dirombak total dari biru krem menjadi **warm pastel-muted** (parchment `--bg #f3ede4` + dusty rosewood `--ink #8f5a66` sebagai satu-satunya aksen) + **sentuhan monokrom** — heading besar (`h1` toolbar, `.group-name`, empty `h2`, `.tag-editor-title`, `.mp-panel-title`, `.picker-title`) memakai `--text` charcoal hangat, aksen rose hanya untuk elemen interaktif/state (nav aktif, tombol, is-playing, progress, focus). Seluruh hardcoded `rgba(2,106,167,…)`/hex biru diganti ke token (alpha-ramp `--ink-a07…a45` via `color-mix`); nama token lama (`--mint`/`--ice`/`--sk-base`/dst) dipertahankan, nilainya di-repoint. **Kontras AA:** `--text-dim #6f6355` (5.01:1), `--ink` di `--bg` (4.71:1) & putih di `--ink` (5.48:1), hover tombol `--ink-hover #7a4955` (7.12:1), teks/ikon pill aktif `--ink-strong`, ikon sekunder `--ink-soft` (3.18:1 — hanya ikon, bukan teks). **Komponen:** sidebar berlabel "Library" + pill aktif + indikator rail kiri (`::before`); icon palu `MagnifyingGlass` di dalam input search (wrapped `<label class="search">` + `.visually-hidden`); mini player bg `--surface` dan judul berubah `--ink-strong` saat `[data-playing="true"]`, panel picker memakai keyframe baru `panel-in` (opacity + `scale(0.97)`, transform-origin center). **Motion pass:** `.progress-fill` animasi `width` → `transform: scaleX` (origin kiri, inline `scaleX(pct/100)`); `scale(0.94)` → `0.95` (7×); skeleton shimmer `background-position` → `::after` `translateX`; dua blok `prefers-reduced-motion` digabung jadi satu di akhir file (termasuk `group-card:hover`, `btn-primary:active`, `progress-fill` transition); scrollbar tipis 8px warm (`.list-wrap/.track-scroll/.mp-panel-list/.lyr-list/.picker-list`); auto-scroll lirik memakai `behavior: reduce ? "auto" : "smooth"` (guard `matchMedia`). `.main` diberi `aria-label="Library content"`. Murni frontend — tanpa kode/command Rust baru, tanpa test Rust baru.
 - Folder browse: view langsung struktur folder, baca tag on-the-fly + cache tipis.
 - Tag editor: FLAC (Vorbis), MP3 (ID3v2), M4A, OGG, WavPack, AIFF, DSF/DFF; backup `.bak` sebelum tulis; via `lofty`.
 - Playlist: internal SQLite + impor/ekspor `.m3u`; queue sesi (drag-reorder, save-as-playlist).
@@ -166,7 +167,7 @@ playlist_tracks(playlist_id, track_id, position)
 | M1 | `core` + `library` + scanner | Lagu muncul, list + search |
 | M2 | `player` libmpv (pump single-thread) + player bar | Play/pause/seek/volume/next/prev + bar |
 | M3 | EQ, ReplayGain, sleep timer, speed, visualizer, lirik | Slice 1 (speed + sleep timer) ✅, Slice 2 (EQ + ReplayGain) ✅, Slice 3 (lirik) ✅, Slice 4 (visualizer generatif + mini window) ✅ — **M3 lengkap**; batch post-M3: shared-WASAPI default, add files/folder, shuffle + reshuffle, nav Albums/Artists/Folders (Amendemen M3 slice 5–8) ✅ |
-| M4 | Playlist + queue + folder browse + tag editor | Slice 1 (playlist + m3u import/export) ✅, Slice 2 (queue: view + drag-reorder + save-as-playlist) ✅, Slice 3 (folder browse: root grid + drill-down + breadcrumb) ✅, Slice 4 (tag editor: modal 8 field + backup `.bak`) ✅, Slice 5 (mini player: kontrol + drag + ganti playlist) ✅, Slice 6 (hapus visualizer + ikon flat + menu UI/UX) ✅ — **M4 lengkap** |
+| M4 | Playlist + queue + folder browse + tag editor | Slice 1 (playlist + m3u import/export) ✅, Slice 2 (queue: view + drag-reorder + save-as-playlist) ✅, Slice 3 (folder browse: root grid + drill-down + breadcrumb) ✅, Slice 4 (tag editor: modal 8 field + backup `.bak`) ✅, Slice 5 (mini player: kontrol + drag + ganti playlist) ✅, Slice 6 (hapus visualizer + ikon flat + menu UI/UX) ✅, Slice 7 (UI/UX overhaul: palet warm pastel-muted + monokrom, sidebar/toolbar/mini player polish, motion pass) ✅ — **M4 lengkap** |
 | M5 | Casting DLNA → Chromecast + NSIS installer + README GitHub | Rilis v1 |
 
 ## 5. Risiko Kunci
@@ -183,20 +184,29 @@ playlist_tracks(playlist_id, track_id, position)
 **Tema:** terinspirasi estetika band indie asal Surabaya **Crayoncase** (noise pop/shoegaze):
 - DIY lo-fi, playful "berbagai warna krayon", sentuhan indie Jepang (Supercar/Solanin era)
 - Nostalgia kaset/CD, film photography, dreamy noise
-- Diekspresikan sebagai: **tema terang krem + tinta biru** (dikonfirmasi user: konsep sketsa tangan — ikan + kaset + not musik; bukan dark) + detail hand-drawn/sketch
+- Diekspresikan sebagai: **warm pastel-muted — parchment + dusty rosewood (M4 slice 7)** — hangat tapi melankolis (nostalgic & bittersweet), sentuhan monokrom pada heading, menggantikan "tema terang krem + tinta biru" (D7/D17)
 
 **Maskot (ikon resmi):** sketsa tinta biru — ikan koi dengan kumis, duduk di atas kaset, not musik melayang, bintang kecil; isian mint muda + highlight es. Dikonversi via `tauri icon` (ico/png/icns semua ukuran). Tetap terbaca di 16px (favicon) hingga 512px (app icon).
 
-**Palet inti (v2 — terang):**
+**Palet inti (v3 — warm pastel-muted, light-only):**
 | Token | Hex | Penggunaan |
 |---|---|---|
-| `--bg` | `#f4f6ea` | Latar utama (krem) |
-| `--surface` | `#ffffff` | Panel/card |
-| `--ink` | `#026aa7` | Tinta biru — aksen/utama |
-| `--mint` | `#e3f1e7` | Isian lembut / highlight lembut |
-| `--ice` | `#c8f7ff` | Highlight (kilau mata/reel) |
-| `--text` | `#26405c` | Teks utama |
-| `--text-dim` | `#5f7d96` | Teks sekunder |
+| `--bg` | `#f3ede4` | Latar utama (parchment hangat) |
+| `--surface` | `#faf5ed` | Panel/card/popover/input; mini player |
+| `--sidebar` | `#ece5d9` | Panel sidebar |
+| `--ink` | `#8f5a66` | Dusty rosewood — aksen/state utama |
+| `--ink-hover` | `#7a4955` | Hover tombol solid (putih 7.12:1) |
+| `--ink-strong` | `#6e3f4b` | Teks/ikon pill aktif (nav, mp-panel, brand) |
+| `--ink-soft` | `#a37a84` | Ikon sekunder (3.18:1 — hanya ikon) |
+| `--mint` | `#f1e7e0` | Hover lembut / cover fallback |
+| `--ice` | `#e6d9d3` | Pill aktif / is-playing / field |
+| `--text` | `#3d352e` | Teks utama + heading besar (monokrom) |
+| `--text-dim` | `#6f6355` | Teks sekunder (≥4.5:1) |
+| `--line` | `#ddd4c6` | Border |
+| `--danger` | `#9a3e35` | Error/danger |
+| `--skeleton` | `#e9dfd3` | Skeleton base |
+
+Alpha-ramp aksen `--ink-a07/a09/a10/a12/a15/a16/a18/a20/a35/a45` via `color-mix(var(--ink) X%, transparent)` + token elevation warm (`--shadow-top`, `--shadow-float`, `--scrim`, `--text-a40`). Heading besar memakai `--text` monokrom; aksen rose hanya untuk elemen interaktif/state.
 
 ## 7. Open Items (bukan blocker)
 
