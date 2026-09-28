@@ -1,6 +1,8 @@
-# Iwaks
 
+<h1 align="center">Iwaks</h1>
+<p align="center">
 <img src="src/assets/iwaks-mark.png" width="64" alt="Iwaks mark">
+</p>
 
 **Hi-res & lossless offline music player for Windows**, built with Tauri v2 (Rust) and React/TypeScript. The audio engine is libmpv over WASAPI in shared mode by default, with exclusive mode available as an opt-in.
 
