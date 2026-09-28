@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Fetch libmpv (tauri resource)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-libmpv.ps1
+
+      - name: Build NSIS installer
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Verify bundle
+        shell: powershell
+        run: |
+          $exe = Get-ChildItem "target\release\bundle\nsis\*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "NSIS installer not produced" }
+          Write-Host "Bundle: $($exe.Name) ($([math]::Round($exe.Length / 1MB, 2)) MB)"
+
+      - name: Generate checksums
+        shell: powershell
+        run: |
+          Get-ChildItem "target\release\bundle\nsis\*.exe" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Set-Content -Path "$($_.FullName).sha256" -Encoding ascii
+            Write-Host "SHA256: $hash  $($_.Name)"
+          }
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/nsis/*.sha256
