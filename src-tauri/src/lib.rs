@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 use iwaks_core::track::{TagEdits, Track};
 use iwaks_library::db::Library;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
+use iwaks_presence::NowPlaying;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -28,6 +29,27 @@ struct ScanEvent {
 
 const PLAYER_UNAVAILABLE: &str =
     "Playback is unavailable — libmpv DLL missing or failed to initialize";
+
+/// Iwaks' Discord application id (public — not a secret). The Rich Presence
+/// session and the `discord-<id>://` protocol registration use this.
+/// Override at runtime with `IWAKS_DISCORD_APP_ID` (used by tests/CI).
+const DISCORD_APP_ID: &str = "1553676698900365344";
+
+/// Map the player state to what Discord should show. `None` clears the
+/// presence — no track loaded, or the queue ended naturally.
+fn to_now_playing(state: &PlayerState) -> Option<NowPlaying> {
+    if state.stopped {
+        return None;
+    }
+    let track = state.current.as_ref()?;
+    Some(NowPlaying {
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        position_secs: state.position,
+        playing: !state.paused,
+    })
+}
 
 fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
@@ -519,10 +541,23 @@ pub fn run() {
             let db_path = data_dir.join("iwaks.db");
 
             let handle = app.handle().clone();
+
+            // Discord Rich Presence: spawn the driver + register the
+            // `discord-<app_id>://` protocol so Discord treats Iwaks as an
+            // app (needed for the presence session and the in-app overlay).
+            let (presence_tx, presence_rx) = mpsc::channel::<Option<NowPlaying>>();
+            let app_id = std::env::var("IWAKS_DISCORD_APP_ID")
+                .unwrap_or_else(|_| DISCORD_APP_ID.to_string());
+            let _presence = iwaks_presence::start(&app_id, presence_rx);
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = iwaks_presence::register::register_protocol(&app_id, &exe);
+            }
+
             let player = match Player::start(
                 &PlayerOptions::default(),
                 Box::new(move |s: &PlayerState| {
                     let _ = handle.emit("player-state", s.clone());
+                    let _ = presence_tx.send(to_now_playing(s));
                 }),
             ) {
                 Ok(p) => Some(p),
