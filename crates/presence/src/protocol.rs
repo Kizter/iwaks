@@ -102,10 +102,15 @@ pub struct Timestamps {
 pub struct Activity {
     /// Discord activity type: 2 = Listening.
     pub kind: u32,
+    /// Short label Discord repeats next to the user in the member list
+    /// ("Listening to <name>").
+    pub name: Option<String>,
     pub details: Option<String>,
     pub state: Option<String>,
     pub large_image: Option<String>,
     pub large_text: Option<String>,
+    pub small_image: Option<String>,
+    pub small_text: Option<String>,
     pub timestamps: Option<Timestamps>,
 }
 
@@ -114,12 +119,23 @@ impl Activity {
     pub fn listening() -> Self {
         Self {
             kind: 2,
+            name: None,
             details: None,
             state: None,
             large_image: None,
             large_text: None,
+            small_image: None,
+            small_text: None,
             timestamps: None,
         }
+    }
+
+    /// Member-list label. Verified against the live client: this field — not
+    /// `details` — is what Discord shows beside the user, so the track title
+    /// belongs here.
+    pub fn name(mut self, value: &str) -> Self {
+        self.name = Some(clamp_field(value));
+        self
     }
 
     pub fn details(mut self, value: &str) -> Self {
@@ -139,6 +155,19 @@ impl Activity {
 
     pub fn large_text(mut self, value: &str) -> Self {
         self.large_text = Some(clamp_field(value));
+        self
+    }
+
+    /// Small overlay image. Only names of assets uploaded in the Discord
+    /// Developer Portal render here — URL and `file://` values are dropped by
+    /// Discord, so the key must match the portal exactly.
+    pub fn small_image(mut self, key: &str) -> Self {
+        self.small_image = Some(clamp_key(key));
+        self
+    }
+
+    pub fn small_text(mut self, value: &str) -> Self {
+        self.small_text = Some(clamp_field(value));
         self
     }
 
@@ -166,19 +195,32 @@ pub fn set_activity_json(pid: u32, nonce: &str, activity: Option<&Activity>) -> 
         Some(a) => {
             let mut map = serde_json::Map::new();
             map.insert("type".to_string(), serde_json::json!(a.kind));
+            if let Some(n) = &a.name {
+                map.insert("name".to_string(), serde_json::json!(n));
+            }
             if let Some(d) = &a.details {
                 map.insert("details".to_string(), serde_json::json!(d));
             }
             if let Some(s) = &a.state {
                 map.insert("state".to_string(), serde_json::json!(s));
             }
-            if a.large_image.is_some() || a.large_text.is_some() {
+            if a.large_image.is_some()
+                || a.large_text.is_some()
+                || a.small_image.is_some()
+                || a.small_text.is_some()
+            {
                 let mut assets = serde_json::Map::new();
                 if let Some(k) = &a.large_image {
                     assets.insert("large_image".to_string(), serde_json::json!(k));
                 }
                 if let Some(t) = &a.large_text {
                     assets.insert("large_text".to_string(), serde_json::json!(t));
+                }
+                if let Some(k) = &a.small_image {
+                    assets.insert("small_image".to_string(), serde_json::json!(k));
+                }
+                if let Some(t) = &a.small_text {
+                    assets.insert("small_text".to_string(), serde_json::json!(t));
                 }
                 map.insert("assets".to_string(), serde_json::Value::Object(assets));
             }
@@ -303,6 +345,45 @@ mod tests {
     fn set_activity_none_sends_empty_activity() {
         let v: serde_json::Value = serde_json::from_str(&set_activity_json(1, "x", None)).unwrap();
         assert_eq!(v["args"]["activity"], serde_json::json!({}));
+    }
+
+    /// `name` is the member-list line; it must serialize even when no other
+    /// text field is set.
+    #[test]
+    fn name_serializes_next_to_type() {
+        let act = Activity::listening().name("Surabaya - Iwaks");
+        let v: serde_json::Value =
+            serde_json::from_str(&set_activity_json(1, "x", Some(&act))).unwrap();
+        assert_eq!(v["args"]["activity"]["name"], "Surabaya - Iwaks");
+        assert!(v["args"]["activity"].get("details").is_none());
+    }
+
+    /// Both image slots live in one `assets` object — Discord rejects the
+    /// activity if the small image is sent as a sibling of it.
+    #[test]
+    fn small_image_shares_the_assets_object() {
+        let act = Activity::listening()
+            .large_image("logo")
+            .large_text("Iwaks")
+            .small_image("note")
+            .small_text("now playing");
+        let v: serde_json::Value =
+            serde_json::from_str(&set_activity_json(1, "x", Some(&act))).unwrap();
+        let assets = &v["args"]["activity"]["assets"];
+        assert_eq!(assets["large_image"], "logo");
+        assert_eq!(assets["large_text"], "Iwaks");
+        assert_eq!(assets["small_image"], "note");
+        assert_eq!(assets["small_text"], "now playing");
+    }
+
+    /// A small image alone still has to produce an `assets` object.
+    #[test]
+    fn small_image_alone_still_emits_assets() {
+        let act = Activity::listening().small_image("note");
+        let v: serde_json::Value =
+            serde_json::from_str(&set_activity_json(1, "x", Some(&act))).unwrap();
+        assert_eq!(v["args"]["activity"]["assets"]["small_image"], "note");
+        assert!(v["args"]["activity"]["assets"].get("large_image").is_none());
     }
 
     #[test]

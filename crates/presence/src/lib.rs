@@ -19,4 +19,4 @@ pub mod presence;
 pub mod protocol;
 pub mod register;
 
-pub use presence::{start, NowPlaying};
+pub use presence::{start, AssetKeys, NowPlaying};

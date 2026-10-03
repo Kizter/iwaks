@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::{Client, Effect, Event, Phase, Transport};
 use crate::pipe::NamedPipe;
-use crate::protocol::{Activity, Timestamps, OP_CLOSE};
+use crate::protocol::{Activity, Timestamps, FIELD_LIMIT, OP_CLOSE};
 
 /// What the user is listening to right now (player-agnostic — the Tauri
 /// layer converts its own state into this).
@@ -28,6 +28,59 @@ pub struct NowPlaying {
     pub playing: bool,
 }
 
+/// App name shown next to the track title.
+const APP_NAME: &str = "Iwaks";
+
+/// Appended to the track title so the member-list line reads
+/// "<judul> - Iwaks".
+const TITLE_SUFFIX: &str = " - Iwaks";
+
+/// Portal asset key used when `IWAKS_DISCORD_ASSET_KEY` is unset.
+const DEFAULT_ASSET_KEY: &str = "logo";
+
+/// Image asset keys, resolved by Discord against the Rich Presence assets
+/// uploaded in the Developer Portal.
+///
+/// Only uploaded keys render. Verified against the live client: `file://`
+/// values are rejected outright, and `http(s)://` values (loopback *and*
+/// public) are accepted by the RPC server but never displayed — Discord
+/// proxies them server-side and drops them from the activity. So a per-track
+/// album cover cannot be shipped from a local file; only portal assets show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetKeys {
+    /// Card image (Iwaks cover). `None` sends no large image at all.
+    pub large: Option<String>,
+    /// Small overlay image, drawn on top of the large one.
+    pub small: Option<String>,
+}
+
+impl AssetKeys {
+    /// Read the keys from the environment. Overrides exist because the portal
+    /// is the only place assets can be registered: renaming an asset there
+    /// must not require a rebuild.
+    pub fn from_env() -> Self {
+        let var = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        };
+        Self {
+            large: var("IWAKS_DISCORD_ASSET_KEY").or_else(|| Some(DEFAULT_ASSET_KEY.to_string())),
+            small: var("IWAKS_DISCORD_SMALL_ASSET_KEY"),
+        }
+    }
+}
+
+impl Default for AssetKeys {
+    fn default() -> Self {
+        Self {
+            large: Some(DEFAULT_ASSET_KEY.to_string()),
+            small: None,
+        }
+    }
+}
+
 /// We poll the pipe for frames roughly this often while idle.
 const MAX_IDLE: Duration = Duration::from_millis(50);
 
@@ -36,7 +89,12 @@ const MAX_IDLE: Duration = Duration::from_millis(50);
 pub fn start(app_id: &str, rx: Receiver<Option<NowPlaying>>) -> JoinHandle<()> {
     let app_id = app_id.to_string();
     std::thread::spawn(move || {
-        run_with_transport(app_id, rx, Box::new(NamedPipe::new()));
+        run_with_transport(
+            app_id,
+            rx,
+            Box::new(NamedPipe::new()),
+            AssetKeys::from_env(),
+        )
     })
 }
 
@@ -46,6 +104,7 @@ fn run_with_transport(
     app_id: String,
     rx: Receiver<Option<NowPlaying>>,
     mut transport: Box<dyn Transport>,
+    assets: AssetKeys,
 ) {
     if cfg!(debug_assertions) {
         eprintln!("[debug] discord presence: app id = {app_id}");
@@ -141,7 +200,7 @@ fn run_with_transport(
             Ok(Some(np)) => {
                 let key = content_key(&np);
                 if last_key.as_deref() != Some(key.as_str()) {
-                    let activity = activity_for(&np, unix_now());
+                    let activity = activity_for(&np, unix_now(), &assets);
                     effects.extend(client.set_activity(Some(activity)));
                     last_key = Some(key);
                 }
@@ -187,18 +246,30 @@ fn content_key(np: &NowPlaying) -> String {
 
 /// Build the activity for what is playing. The elapsed timer (Discord renders
 /// it automatically from `start`) is anchored at `now − position`.
-fn activity_for(np: &NowPlaying, now: u64) -> Activity {
-    let mut activity = Activity::listening()
-        .details(&np.title)
-        .large_image("art")
-        .large_text("Iwaks");
+///
+/// Field placement was determined by probing the live client, not by guessing:
+/// Discord shows `name` next to the user in the member list ("Listening to
+/// &lt;title&gt; - Iwaks") and `details` / `state` only on the profile card. So
+/// the track title goes in `name` and the artist/album line in `details`.
+fn activity_for(np: &NowPlaying, now: u64, assets: &AssetKeys) -> Activity {
+    // Reserve room for the suffix first: clamping the finished string would
+    // cut the app name off whenever the title is long.
+    let room = FIELD_LIMIT - TITLE_SUFFIX.chars().count();
+    let title: String = np.title.chars().take(room).collect();
+    let mut activity = Activity::listening().name(&format!("{title}{TITLE_SUFFIX}"));
     match (&np.artist, &np.album) {
         (Some(artist), Some(album)) => {
-            activity = activity.state(&format!("{artist} — {album}"));
+            activity = activity.details(&format!("{artist} — {album}"));
         }
-        (Some(artist), None) => activity = activity.state(artist),
-        (None, Some(album)) => activity = activity.state(album),
+        (Some(artist), None) => activity = activity.details(artist),
+        (None, Some(album)) => activity = activity.details(album),
         (None, None) => {}
+    }
+    if let Some(key) = &assets.large {
+        activity = activity.large_image(key).large_text(APP_NAME);
+    }
+    if let Some(key) = &assets.small {
+        activity = activity.small_image(key);
     }
     if np.playing {
         let start = now.saturating_sub(np.position_secs.max(0.0) as u64);
@@ -252,33 +323,87 @@ mod tests {
 
     #[test]
     fn activity_for_playing_is_listening_with_timestamps() {
-        let a = activity_for(&np("Lagu A", 12.0, true), 1_000_000);
+        let a = activity_for(&np("Lagu A", 12.0, true), 1_000_000, &AssetKeys::default());
         let payload = crate::protocol::set_activity_json(1, "x", Some(&a));
         let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
         let act = &v["args"]["activity"];
         assert_eq!(act["type"], 2);
-        assert_eq!(act["details"], "Lagu A");
-        assert_eq!(act["state"], "Artis — Album");
-        assert_eq!(act["assets"]["large_image"], "art");
+        assert_eq!(act["name"], "Lagu A - Iwaks");
+        assert_eq!(act["details"], "Artis — Album");
+        assert_eq!(act["assets"]["large_image"], "logo");
         assert_eq!(act["timestamps"]["start"], 1_000_000 - 12);
+    }
+
+    /// Discord's member list renders `name` (probed against the live client),
+    /// so the track title must never end up only in `details`.
+    #[test]
+    fn name_carries_the_track_title_and_the_app() {
+        let a = activity_for(&np("Surabaya", 3.0, true), 0, &AssetKeys::default());
+        assert_eq!(a.name.as_deref(), Some("Surabaya - Iwaks"));
+        assert_eq!(a.details.as_deref(), Some("Artis — Album"));
+        assert_eq!(a.state, None);
+    }
+
+    /// Titles longer than Discord's 128-char field limit are clamped, and the
+    /// clamp must not eat the app suffix that identifies the player.
+    #[test]
+    fn long_titles_are_clamped_but_keep_the_app_suffix() {
+        let long = "x".repeat(200);
+        let a = activity_for(&np(&long, 0.0, true), 0, &AssetKeys::default());
+        let name = a.name.unwrap();
+        assert_eq!(name.chars().count(), 128);
+        assert!(
+            name.ends_with(TITLE_SUFFIX),
+            "clamped name should still name the app"
+        );
+    }
+
+    #[test]
+    fn asset_keys_choose_which_images_are_sent() {
+        let keys = AssetKeys {
+            large: Some("cover".to_string()),
+            small: Some("note".to_string()),
+        };
+        let a = activity_for(&np("Lagu", 0.0, true), 0, &keys);
+        let payload = crate::protocol::set_activity_json(1, "x", Some(&a));
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(v["args"]["activity"]["assets"]["large_image"], "cover");
+        assert_eq!(v["args"]["activity"]["assets"]["small_image"], "note");
+    }
+
+    /// Discord drops unresolved keys, so a misconfigured key must produce no
+    /// assets at all rather than a broken image reference.
+    #[test]
+    fn missing_asset_keys_send_no_images() {
+        let a = activity_for(
+            &np("Lagu", 0.0, true),
+            0,
+            &AssetKeys {
+                large: None,
+                small: None,
+            },
+        );
+        let payload = crate::protocol::set_activity_json(1, "x", Some(&a));
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert!(v["args"]["activity"].get("assets").is_none());
     }
 
     #[test]
     fn activity_for_paused_has_no_timestamps() {
-        let a = activity_for(&np("Lagu A", 12.0, false), 1_000_000);
+        let a = activity_for(&np("Lagu A", 12.0, false), 1_000_000, &AssetKeys::default());
         let payload = crate::protocol::set_activity_json(1, "x", Some(&a));
         let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert!(v["args"]["activity"].get("timestamps").is_none());
     }
 
     #[test]
-    fn state_falls_back_to_artist_only() {
+    fn details_falls_back_to_artist_only() {
         let mut n = np("Lagu", 0.0, true);
         n.album = None;
-        let a = activity_for(&n, 0);
+        let a = activity_for(&n, 0, &AssetKeys::default());
         let payload = crate::protocol::set_activity_json(1, "x", Some(&a));
         let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
-        assert_eq!(v["args"]["activity"]["state"], "Artis");
+        assert_eq!(v["args"]["activity"]["details"], "Artis");
     }
 
     /// A scripted transport: writes go to a channel the test asserts on,
@@ -333,6 +458,7 @@ mod tests {
                     script: rx_script,
                     open: false,
                 }),
+                AssetKeys::default(),
             )
         });
 
@@ -356,7 +482,7 @@ mod tests {
         let f = decode_frame(&activity).unwrap();
         let v: serde_json::Value = serde_json::from_str(&f.payload).unwrap();
         assert_eq!(v["cmd"], "SET_ACTIVITY");
-        assert_eq!(v["args"]["activity"]["details"], "Lagu A");
+        assert_eq!(v["args"]["activity"]["name"], "Lagu A - Iwaks");
         assert!(v["args"]["activity"]["timestamps"]["start"].is_u64());
 
         // 4) Position tick with SAME content → no re-send.
