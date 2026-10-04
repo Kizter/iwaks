@@ -75,6 +75,24 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position);
 ";
 
+/// Schema v3: app settings + the album-art lookup cache.
+///
+/// `settings` is a plain key/value store so features can persist their own
+/// flags without a migration each; values are text (`"true"` / `"false"`).
+/// `cover_cache` stores a NULL `artwork_url` to remember "the provider has no
+/// such album" so the lookup is not retried on every track.
+const SCHEMA_V3: &str = "
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cover_cache (
+    album_key   TEXT PRIMARY KEY,
+    artwork_url TEXT
+);
+";
+
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
     #[error("database error: {0}")]
@@ -85,7 +103,7 @@ pub enum LibraryError {
     Invalid(String),
     #[error("not found: {0}")]
     NotFound(String),
-    #[error("unsupported schema version {0} (this build supports v2)")]
+    #[error("unsupported schema version {0} (this build supports v3)")]
     UnsupportedSchema(i32),
 }
 
@@ -113,13 +131,19 @@ impl Library {
             0 => {
                 conn.execute_batch(SCHEMA_V1)?;
                 conn.execute_batch(SCHEMA_V2)?;
-                conn.pragma_update(None, "user_version", 2)?;
+                conn.execute_batch(SCHEMA_V3)?;
+                conn.pragma_update(None, "user_version", 3)?;
             }
             1 => {
                 conn.execute_batch(SCHEMA_V2)?;
-                conn.pragma_update(None, "user_version", 2)?;
+                conn.execute_batch(SCHEMA_V3)?;
+                conn.pragma_update(None, "user_version", 3)?;
             }
-            2 => {}
+            2 => {
+                conn.execute_batch(SCHEMA_V3)?;
+                conn.pragma_update(None, "user_version", 3)?;
+            }
+            3 => {}
             other => return Err(LibraryError::UnsupportedSchema(other)),
         }
         // Cascade playlist entries / playlist rows when a track or playlist

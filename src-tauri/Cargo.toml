@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 iwaks-core = { path = "../crates/core" }
+iwaks-cover = { path = "../crates/cover" }
 iwaks-library = { path = "../crates/library" }
 iwaks-player = { path = "../crates/player" }
 iwaks-presence.workspace = true

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -11,6 +11,8 @@ use iwaks_presence::NowPlaying;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+pub mod cover;
+
 /// Shared application state. `Library` connections are opened per call,
 /// so this stays `Send + Sync`. The player is `None` when libmpv failed to
 /// initialize (e.g. the DLL is missing) — the app still runs, without audio.
@@ -18,6 +20,11 @@ pub struct AppState {
     db_path: PathBuf,
     scanning: Arc<AtomicBool>,
     player: Arc<Mutex<Option<Arc<Player>>>>,
+    /// Live opt-in flag for online album art. Cached here because the playback
+    /// sink reads it ~10×/second and must not open the database to do so.
+    online_cover: Arc<AtomicBool>,
+    /// Last resolved album art, shared with the lookup threads.
+    cover_memo: cover::SharedMemo,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -37,7 +44,7 @@ const DISCORD_APP_ID: &str = "1553676698900365344";
 
 /// Map the player state to what Discord should show. `None` clears the
 /// presence — no track loaded, or the queue ended naturally.
-fn to_now_playing(state: &PlayerState) -> Option<NowPlaying> {
+fn to_now_playing(state: &PlayerState, cover_url: Option<String>) -> Option<NowPlaying> {
     if state.stopped {
         return None;
     }
@@ -48,11 +55,75 @@ fn to_now_playing(state: &PlayerState) -> Option<NowPlaying> {
         album: track.album.clone(),
         position_secs: state.position,
         playing: !state.paused,
+        cover_url,
     })
+}
+
+/// Decide what cover art to show for this tick, kicking off a lookup when the
+/// track changed. Cheap by construction: one mutex lock, and no disk or network
+/// work unless a new album needs resolving.
+fn cover_for_tick(
+    state: &PlayerState,
+    enabled: bool,
+    memo: &cover::SharedMemo,
+    db_path: &Path,
+) -> Option<String> {
+    let track = state.current.as_ref()?;
+    let (artist, album) = (
+        track.artist.clone().unwrap_or_default(),
+        track.album.clone().unwrap_or_default(),
+    );
+    let key = if enabled {
+        iwaks_cover::album_key(Some(&artist), Some(&album))
+    } else {
+        String::new()
+    };
+    match memo.lock().expect("cover memo").on_track(&key) {
+        cover::CoverAction::Known(url) => url,
+        cover::CoverAction::Waiting => None,
+        cover::CoverAction::Start => {
+            cover::resolve_in_background(db_path.to_path_buf(), memo.clone(), key, artist, album);
+            None
+        }
+    }
+}
+
+/// Whether album art is fetched from the internet for the Rich Presence.
+///
+/// Stored as text because the settings table is a plain key/value store; an
+/// absent or unreadable key means "off", which keeps the network-free default
+/// even if the database is unavailable.
+fn read_online_cover(db_path: &Path) -> bool {
+    Library::open(&db_path.to_string_lossy())
+        .ok()
+        .and_then(|lib| lib.setting(cover::SETTING_ONLINE_COVER).ok().flatten())
+        .is_some_and(|value| value == "true")
 }
 
 fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
+}
+
+/// Whether the Rich Presence looks album art up online (opt-in).
+#[tauri::command]
+fn get_online_cover(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.online_cover.load(Ordering::Relaxed))
+}
+
+/// Turn online album art on or off. Clearing the memo makes the change visible
+/// on the very next playback tick: on, the current track is looked up; off, any
+/// cover already resolved is dropped from the card.
+#[tauri::command]
+fn set_online_cover(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .set_setting(
+            cover::SETTING_ONLINE_COVER,
+            if enabled { "true" } else { "false" },
+        )
+        .map_err(|e| e.to_string())?;
+    state.online_cover.store(enabled, Ordering::Relaxed);
+    state.cover_memo.lock().expect("cover memo").clear();
+    Ok(())
 }
 
 /// Clone of the live player handle, or `None` when playback is unavailable.
@@ -540,6 +611,17 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("iwaks.db");
 
+            // Album art for the presence card. Read once here so the playback
+            // sink never opens the database; the opt-in lives in settings and
+            // defaults to off, i.e. no request leaves the machine.
+            let online_cover = Arc::new(AtomicBool::new(read_online_cover(&db_path)));
+            let cover_memo: cover::SharedMemo = Arc::new(Mutex::new(cover::CoverMemo::new()));
+            // The sink closure needs its own handles; `AppState` keeps the
+            // originals so the settings commands can reach them.
+            let sink_db_path = db_path.clone();
+            let sink_flag = Arc::clone(&online_cover);
+            let sink_memo = Arc::clone(&cover_memo);
+
             let handle = app.handle().clone();
 
             // Discord Rich Presence: spawn the driver + register the
@@ -557,7 +639,13 @@ pub fn run() {
                 &PlayerOptions::default(),
                 Box::new(move |s: &PlayerState| {
                     let _ = handle.emit("player-state", s.clone());
-                    let _ = presence_tx.send(to_now_playing(s));
+                    let url = cover_for_tick(
+                        s,
+                        sink_flag.load(Ordering::Relaxed),
+                        &sink_memo,
+                        &sink_db_path,
+                    );
+                    let _ = presence_tx.send(to_now_playing(s, url));
                 }),
             ) {
                 Ok(p) => Some(p),
@@ -572,6 +660,8 @@ pub fn run() {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
                 player: Arc::new(Mutex::new(player)),
+                online_cover,
+                cover_memo,
             });
 
             // Auto-open the mini player while the main window is minimized,
@@ -633,7 +723,9 @@ pub fn run() {
             export_m3u,
             get_queue,
             reorder_queue,
-            save_queue_as_playlist
+            save_queue_as_playlist,
+            get_online_cover,
+            set_online_cover
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

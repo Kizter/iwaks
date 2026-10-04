@@ -135,6 +135,18 @@ export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {
   return invoke<void>("set_replaygain", { mode });
 }
 
+// ---------- settings ----------
+
+/** Whether the Rich Presence looks album art up online (opt-in, default off). */
+export function getOnlineCover(): Promise<boolean> {
+  return invoke<boolean>("get_online_cover");
+}
+
+/** Turn online album art on/off. Takes effect on the next playback tick. */
+export function setOnlineCover(enabled: boolean): Promise<void> {
+  return invoke<void>("set_online_cover", { enabled });
+}
+
 /** Lyrics for a track (embedded / `.lrc` sidecar), or `null` when absent. */
 export function getLyrics(path: string): Promise<Lyrics | null> {
   return invoke<Lyrics | null>("get_lyrics", { path });

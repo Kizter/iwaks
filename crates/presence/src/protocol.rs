@@ -20,8 +20,6 @@ pub const OP_PONG: u32 = 4;
 
 /// Maximum length (in chars) of Discord `details` / `state` / text fields.
 pub const FIELD_LIMIT: usize = 128;
-/// Maximum length (in chars) of an asset key (`large_image` / `small_image`).
-pub const ASSET_KEY_LIMIT: usize = 32;
 
 /// One decoded RPC frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,8 +146,11 @@ impl Activity {
         self
     }
 
-    pub fn large_image(mut self, key: &str) -> Self {
-        self.large_image = Some(clamp_key(key));
+    /// Card image: either an asset key from the Discord Developer Portal or any
+    /// image URL Discord's servers can reach. Not truncated — see
+    /// [`Activity::small_image`].
+    pub fn large_image(mut self, image: &str) -> Self {
+        self.large_image = Some(image.to_string());
         self
     }
 
@@ -158,11 +159,12 @@ impl Activity {
         self
     }
 
-    /// Small overlay image. Only names of assets uploaded in the Discord
-    /// Developer Portal render here — URL and `file://` values are dropped by
-    /// Discord, so the key must match the portal exactly.
-    pub fn small_image(mut self, key: &str) -> Self {
-        self.small_image = Some(clamp_key(key));
+    /// Badge drawn over the large image. Same value space as [`Self::large_image`]
+    /// — a portal asset key or a reachable image URL — and deliberately not
+    /// truncated: cover-art URLs run past 100 characters, and cutting one
+    /// leaves a broken image rather than a missing one.
+    pub fn small_image(mut self, image: &str) -> Self {
+        self.small_image = Some(image.to_string());
         self
     }
 
@@ -180,11 +182,6 @@ impl Activity {
 /// Truncate to [`FIELD_LIMIT`] chars, never splitting a UTF-8 char.
 fn clamp_field(value: &str) -> String {
     value.chars().take(FIELD_LIMIT).collect()
-}
-
-/// Truncate to [`ASSET_KEY_LIMIT`] chars.
-fn clamp_key(value: &str) -> String {
-    value.chars().take(ASSET_KEY_LIMIT).collect()
 }
 
 /// Build the `SET_ACTIVITY` payload. `None` clears the presence
@@ -401,18 +398,30 @@ mod tests {
         );
     }
 
+    /// A real cover-art CDN URL, used to pin the "no truncation" contract below.
+    const LONG_IMAGE_URL: &str = "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/bd/36/e6/bd36e66e-a2d6-6e81-ba61-e0c31358d8a5/199199977931.jpg/600x600bb.jpg";
+
+    /// Image fields carry either a short portal asset key or a full CDN URL.
+    /// Truncating the latter would leave a broken URL — and a broken URL is a
+    /// broken image, which is what a 32-char cap used to produce. Probed
+    /// against the live client: the URL above (135 chars) renders fine, so
+    /// these fields are passed through untouched.
     #[test]
-    fn asset_key_clamped_to_32_chars() {
-        let act = Activity::listening().large_image(&"k".repeat(80));
+    fn image_fields_are_not_truncated() {
+        // Comfortably past the 32-char cap that used to live here.
+        assert!(LONG_IMAGE_URL.chars().count() > 32);
+        let act = Activity::listening()
+            .large_image(LONG_IMAGE_URL)
+            .small_image(LONG_IMAGE_URL);
         let v: serde_json::Value =
             serde_json::from_str(&set_activity_json(1, "x", Some(&act))).unwrap();
         assert_eq!(
-            v["args"]["activity"]["assets"]["large_image"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count(),
-            32
+            v["args"]["activity"]["assets"]["large_image"],
+            LONG_IMAGE_URL
+        );
+        assert_eq!(
+            v["args"]["activity"]["assets"]["small_image"],
+            LONG_IMAGE_URL
         );
     }
 

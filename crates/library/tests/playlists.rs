@@ -250,7 +250,7 @@ fn import_m3u_resolves_relative_entries() {
 // ---------- migration ----------
 
 #[test]
-fn migration_v1_to_v2_preserves_tracks_and_adds_playlists() {
+fn migration_from_v1_preserves_tracks_and_adds_playlists() {
     let tmp = TempDir::new("migrate-v2");
     let db_path = tmp.path("lib.db");
     let mut lib = Library::open(&db_path.to_string_lossy()).expect("fresh open (v2)");
@@ -267,7 +267,7 @@ fn migration_v1_to_v2_preserves_tracks_and_adds_playlists() {
         .unwrap();
     drop(lib);
 
-    let mut reopened = Library::open(&db_path.to_string_lossy()).expect("migrate 1 → 2");
+    let mut reopened = Library::open(&db_path.to_string_lossy()).expect("migrate v1 forward");
     assert_eq!(
         reopened.track_count().unwrap(),
         1,
@@ -283,7 +283,7 @@ fn migration_v1_to_v2_preserves_tracks_and_adds_playlists() {
         .conn()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3, "a v1 library lands on the current schema");
 }
 
 // ---------- bulk add (save-as-playlist, M4 slice 2) ----------

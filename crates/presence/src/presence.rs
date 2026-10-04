@@ -26,6 +26,10 @@ pub struct NowPlaying {
     /// Position in the track, in seconds (used to anchor the elapsed timer).
     pub position_secs: f64,
     pub playing: bool,
+    /// Album art as a URL Discord's servers can fetch, when one was resolved.
+    /// `None` keeps the app logo as the card image. This crate never resolves
+    /// it — lookup and caching belong to the app layer (`iwaks-cover`).
+    pub cover_url: Option<String>,
 }
 
 /// App name shown next to the track title.
@@ -41,16 +45,24 @@ const DEFAULT_ASSET_KEY: &str = "logo";
 /// Image asset keys, resolved by Discord against the Rich Presence assets
 /// uploaded in the Developer Portal.
 ///
-/// Only uploaded keys render. Verified against the live client: `file://`
-/// values are rejected outright, and `http(s)://` values (loopback *and*
-/// public) are accepted by the RPC server but never displayed — Discord
-/// proxies them server-side and drops them from the activity. So a per-track
-/// album cover cannot be shipped from a local file; only portal assets show.
+/// Only uploaded keys render, and an unresolved key is dropped from the
+/// activity without a word — so a key must match the portal exactly
+/// (case-sensitive).
+///
+/// A portal asset is not the only thing Discord can draw. Its servers fetch
+/// `large_image` / `small_image` URLs themselves, so any publicly reachable
+/// image works, while `file://` and loopback addresses cannot (they never
+/// leave the user's machine). Verified against the live client: artwork from a
+/// public CDN displays, `127.0.0.1` shows a broken image. That is what
+/// [`NowPlaying::cover_url`] carries — see `iwaks-cover` for the lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetKeys {
-    /// Card image (Iwaks cover). `None` sends no large image at all.
+    /// Portal asset shown when no album cover was resolved for the track — by
+    /// default the Iwaks logo.
     pub large: Option<String>,
-    /// Small overlay image, drawn on top of the large one.
+    /// Badge drawn over the large image. When a cover is present and this is
+    /// unset, `large` moves into the small slot so the app still identifies
+    /// itself.
     pub small: Option<String>,
 }
 
@@ -233,14 +245,17 @@ fn log_phase_change(before: Phase, after: Phase) {
 }
 
 /// Content identity: position and timestamps are deliberately excluded so
-/// steady playback does not resend the activity for every state tick.
+/// steady playback does not resend the activity for every state tick. The
+/// cover *is* included — it arrives after the track started, and without it the
+/// enriched activity would be treated as a duplicate and never sent.
 fn content_key(np: &NowPlaying) -> String {
     format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}",
         np.title,
         np.artist.as_deref().unwrap_or(""),
         np.album.as_deref().unwrap_or(""),
-        np.playing
+        np.playing,
+        np.cover_url.as_deref().unwrap_or("")
     )
 }
 
@@ -265,11 +280,31 @@ fn activity_for(np: &NowPlaying, now: u64, assets: &AssetKeys) -> Activity {
         (None, Some(album)) => activity = activity.details(album),
         (None, None) => {}
     }
-    if let Some(key) = &assets.large {
-        activity = activity.large_image(key).large_text(APP_NAME);
-    }
-    if let Some(key) = &assets.small {
-        activity = activity.small_image(key);
+    match (&np.cover_url, &assets.large) {
+        // A resolved cover takes the large slot; the portal asset moves to the
+        // badge so the card still says which app is playing.
+        (Some(url), Some(logo)) => {
+            activity = activity
+                .large_image(url)
+                .large_text(np.album.as_deref().unwrap_or(APP_NAME))
+                .small_image(assets.small.as_deref().unwrap_or(logo));
+        }
+        (Some(url), None) => {
+            activity = activity
+                .large_image(url)
+                .large_text(np.album.as_deref().unwrap_or(APP_NAME));
+        }
+        (None, Some(key)) => {
+            activity = activity.large_image(key).large_text(APP_NAME);
+            if let Some(key) = &assets.small {
+                activity = activity.small_image(key);
+            }
+        }
+        (None, None) => {
+            if let Some(key) = &assets.small {
+                activity = activity.small_image(key);
+            }
+        }
     }
     if np.playing {
         let start = now.saturating_sub(np.position_secs.max(0.0) as u64);
@@ -302,7 +337,22 @@ mod tests {
             album: Some("Album".to_string()),
             position_secs: position,
             playing,
+            cover_url: None,
         }
+    }
+
+    /// A track carrying a resolved cover, as the app sends once a lookup lands.
+    fn np_with_cover(title: &str, url: &str) -> NowPlaying {
+        NowPlaying {
+            cover_url: Some(url.to_string()),
+            ..np(title, 0.0, true)
+        }
+    }
+
+    fn assets_of(a: &Activity) -> serde_json::Value {
+        let payload = crate::protocol::set_activity_json(1, "x", Some(a));
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        v["args"]["activity"]["assets"].clone()
     }
 
     #[test]
@@ -319,6 +369,67 @@ mod tests {
             content_key(&np("Lagu", 10.0, true)),
             content_key(&np("Lain", 10.0, true))
         );
+    }
+
+    /// Discord draws `large_image` prominently and `small_image` as a badge on
+    /// top of it, so the album sleeve takes the large slot and the app logo
+    /// becomes the badge. This is the layout a Discord user expects: the music
+    /// they are hearing, plus which player is playing it.
+    #[test]
+    fn a_cover_takes_the_large_slot_and_the_logo_becomes_the_badge() {
+        let url = "https://cdn.example/album/600x600bb.jpg";
+        let assets = assets_of(&activity_for(
+            &np_with_cover("Lagu", url),
+            0,
+            &AssetKeys::default(),
+        ));
+        assert_eq!(assets["large_image"], url);
+        assert_eq!(assets["small_image"], DEFAULT_ASSET_KEY);
+    }
+
+    /// With no cover (feature off, no match, or offline) the card keeps the
+    /// logo alone — no empty large image and no duplicate badge.
+    #[test]
+    fn without_a_cover_the_logo_stays_the_large_image() {
+        let assets = assets_of(&activity_for(
+            &np("Lagu", 0.0, true),
+            0,
+            &AssetKeys::default(),
+        ));
+        assert_eq!(assets["large_image"], DEFAULT_ASSET_KEY);
+        assert!(assets.get("small_image").is_none(), "{assets}");
+    }
+
+    /// An explicitly configured badge key still wins over the logo fallback.
+    #[test]
+    fn a_configured_small_asset_key_overrides_the_logo_badge() {
+        let keys = AssetKeys {
+            large: Some(DEFAULT_ASSET_KEY.to_string()),
+            small: Some("note".to_string()),
+        };
+        let url = "https://cdn.example/album/600x600bb.jpg";
+        let assets = assets_of(&activity_for(&np_with_cover("Lagu", url), 0, &keys));
+        assert_eq!(assets["small_image"], "note");
+    }
+
+    /// A cover is resolved asynchronously, after the activity for that track
+    /// was already sent. The content key decides whether a resend happens, so
+    /// an arriving cover must change it — otherwise the sleeve would never
+    /// appear.
+    #[test]
+    fn an_arriving_cover_changes_the_content_key() {
+        let before = np("Lagu", 5.0, true);
+        let after = np_with_cover("Lagu", "https://cdn.example/album/600x600bb.jpg");
+        assert_ne!(content_key(&before), content_key(&after));
+    }
+
+    /// The reverse also holds: leaving a track must not be blocked by a stale
+    /// cover lingering on the cleared state.
+    #[test]
+    fn content_key_still_separates_different_tracks() {
+        let a = np_with_cover("Lagu A", "https://cdn.example/a.jpg");
+        let b = np_with_cover("Lagu B", "https://cdn.example/a.jpg");
+        assert_ne!(content_key(&a), content_key(&b));
     }
 
     #[test]

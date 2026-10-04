@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/core", "crates/library", "crates/tags", "crates/player", "crates/presence"]
+members = ["src-tauri", "crates/core", "crates/library", "crates/tags", "crates/player", "crates/presence", "crates/cover"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,7 @@ license = "MIT"
 
 [workspace.dependencies]
 iwaks-core = { path = "crates/core" }
+iwaks-cover = { path = "crates/cover" }
 iwaks-library = { path = "crates/library" }
 iwaks-presence = { path = "crates/presence" }
 iwaks-tags = { path = "crates/tags" }

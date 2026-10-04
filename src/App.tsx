@@ -31,8 +31,10 @@ import "./App.css";
 import { formatBadge, formatDuration, scanSummary } from "./format";
 import { Cover } from "./Cover";
 import PlayerBar from "./PlayerBar";
+import Settings from "./Settings";
 import {
   Folder,
+  GearSix,
   ListBullets,
   MagnifyingGlass,
   MusicNote,
@@ -58,7 +60,8 @@ type View =
   | { kind: "queue" }
   | { kind: "album"; key: string }
   | { kind: "artist"; key: string }
-  | { kind: "folder"; key: string };
+  | { kind: "folder"; key: string }
+  | { kind: "settings" };
 
 type GroupKind = "album" | "artist" | "folder";
 
@@ -839,6 +842,11 @@ const NAV_ITEMS: Array<{
   { id: "queue", label: "Queue", icon: ListBullets },
 ];
 
+/** Pinned to the sidebar bottom — not part of the Library group. */
+const FOOT_ITEMS: Array<{ id: "settings"; label: string; icon: Icon }> = [
+  { id: "settings", label: "Settings", icon: GearSix },
+];
+
 /** Which sidebar entries the current view belongs under (grid or its detail). */
 function homeOf(view: View): View["kind"] {
   if (view.kind === "albums" || view.kind === "album") return "albums";
@@ -846,6 +854,7 @@ function homeOf(view: View): View["kind"] {
   if (view.kind === "folders" || view.kind === "folder") return "folders";
   if (view.kind === "playlists" || view.kind === "playlist") return "playlists";
   if (view.kind === "queue") return "queue";
+  if (view.kind === "settings") return "settings";
   return "songs";
 }
 
@@ -912,6 +921,28 @@ function Shell({
         <p className="sidebar-label">Library</p>
         <nav className="nav" aria-label="Library">
           {NAV_ITEMS.map((item) => {
+            const active = home === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-item${active ? " active" : ""}`}
+                aria-current={active ? "page" : undefined}
+                onClick={() => onNavigate({ kind: item.id })}
+              >
+                <item.icon
+                  className="nav-ico"
+                  size={18}
+                  weight={active ? "fill" : "regular"}
+                  aria-hidden="true"
+                />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <nav className="nav nav-foot" aria-label="Application">
+          {FOOT_ITEMS.map((item) => {
             const active = home === item.id;
             return (
               <button
@@ -1421,6 +1452,15 @@ function App() {
 
   const detailTitle =
     groupKind === "folder" && groupKey ? nameOfDir(groupKey) : (groupKey ?? "");
+  // Settings is its own surface: no search box, no add-folder buttons, no list.
+  // Rendered before the library shell's body so the toolbar stays minimal.
+  if (view.kind === "settings") {
+    return (
+      <Shell playerState={playerState} view={view} onNavigate={setView}>
+        <Settings />
+      </Shell>
+    );
+  }
   const pageTitle =
     view.kind === "songs"
       ? "Songs"

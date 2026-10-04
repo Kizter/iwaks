@@ -197,6 +197,14 @@ body {
 
 /* ---------- main ---------- */
 
+.nav-foot {
+  /* Pins the settings entry to the bottom of the sidebar, below the Library
+     group, without changing the nav's own layout. */
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .main {
   display: flex;
   flex-direction: column;
@@ -1924,6 +1932,105 @@ input[type="range"]:disabled {
   }
 }
 
+/* ---------- settings ---------- */
+
+.set-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 22px 28px;
+}
+.set-group {
+  max-width: 620px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--shadow-top);
+}
+.set-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.set-group-title svg {
+  color: var(--ink);
+}
+.set-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding-top: 14px;
+}
+.set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.set-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--ink-strong);
+}
+.set-note {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.set-error {
+  margin: 14px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+/* Switch — 44×24 track, 18px knob, 20px travel. */
+.switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  margin-top: 2px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ice);
+  cursor: pointer;
+  transition: background-color 140ms ease-out, border-color 140ms ease-out;
+}
+.switch:hover:not(:disabled) {
+  border-color: var(--ink-a35);
+}
+.switch.on {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.switch:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow-top);
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.switch.on .switch-knob {
+  transform: translateX(20px);
+}
+
 /* ---------- thin warm scrollbars ---------- */
 
 .list-wrap::-webkit-scrollbar,
@@ -1984,6 +2091,10 @@ input[type="range"]:disabled {
   .group-card:hover,
   .group-card:focus-visible {
     transform: none;
+  }
+  .switch,
+  .switch-knob {
+    transition: none;
   }
   .progress-fill {
     transition: none;
