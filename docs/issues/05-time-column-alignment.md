@@ -15,10 +15,10 @@ the header still uses 3.
 
 ## Evidence
 
-- `src/App.css:393-403` — `.track-head` grid `44px 1fr 128px`.
-- `src/App.tsx:1624-1627` — header markup has only `<span>Title</span>` +
+- `src/App.css:401-408` — `.track-head` grid `44px 1fr 128px`.
+- `src/App.tsx:1664-1667` — header markup has only `<span>Title</span>` +
   `<span class="track-head-dur">Time</span>` (2 children for a 3-col grid).
-- `src/App.css:1664` — Queue rows use `28px 44px 1fr 240px` (4 columns)
+- `src/App.css:1672` — Queue rows use `28px 44px 1fr 240px` (4 columns)
   vs the same 3-column header.
 
 ## Impact

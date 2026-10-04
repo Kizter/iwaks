@@ -21,12 +21,13 @@ Several WCAG 2.2 AA gaps found in the grill:
 
 ## Evidence
 
-- `src/App.css:10` — `--ink-soft: #a37a84` (3.18:1).
-- `src/App.css:596` — badge `font-size: 0.6rem`; multiple 0.64–0.72rem
-  labels (lines 967, 974, 1164, 1389, 1394, 1404).
+- `src/App.css:9` — `--ink-soft: #a37a84` (3.18:1).
+- `src/App.css:604` — badge `font-size: 0.6rem`; multiple 0.64–0.72rem
+  labels (lines 406, 823, 884, 975, 982, 1172, 1397, 1402, 1412, 1835, 1867).
 - `src/App.tsx` — Queue `onReorder` via HTML5 drag & drop only (no keyboard
   path).
-- `src/App.css` — one global `:focus-visible` outline rule.
+- `src/App.css` — one global `:focus-visible` outline rule (`:65`) plus
+  input-specific overrides that replace it with a box-shadow ring.
 
 ## Impact
 

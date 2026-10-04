@@ -26,7 +26,8 @@ Four small, independent correctness gaps surfaced in the grill:
 - `crates/library/src/playlists.rs:42-48` — `create_playlist` inserts any
   trimmed non-empty name; schema at `db.rs:62-66` has no `UNIQUE(name)`.
 - `crates/library/src/scan.rs:157-159` — `norm()` key; `db.rs:13`
-  (`UNIQUE(path)`), `db.rs:132-149` (`ON CONFLICT(path)` on raw path).
+  (`UNIQUE(path)`), `db.rs:156-175` (`upsert_track` with
+  `ON CONFLICT(path)` at `:164`, matching on the raw path).
 - `src/PlayerBar.tsx:146-151, 246-259` — `commitSeek` on pointerup/keyup;
   `onBlur={() => setDrag(null)}` discards uncommitted drag.
 - `crates/library/src/playlists.rs:229-236` — `std::fs::read_to_string`

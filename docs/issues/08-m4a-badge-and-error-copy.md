@@ -21,9 +21,9 @@ Two copy/accuracy issues:
 ## Evidence
 
 - `src/format.ts:26` — `m4a: "ALAC"` in the badge map.
-- `src-tauri/src/lib.rs:29-30` — `PLAYER_UNAVAILABLE` message with
-  implementation detail ("libmpv DLL").
-- `src/App.tsx:1096` — banner renders `String(e)` from backend errors;
+- `src-tauri/src/lib.rs:37-38` — `PLAYER_UNAVAILABLE` message with
+  implementation detail ("libmpv DLL missing or failed to initialize").
+- `src/App.tsx:1127` — banner renders `String(e)` from backend errors;
   other `catch` paths do the same.
 
 ## Impact

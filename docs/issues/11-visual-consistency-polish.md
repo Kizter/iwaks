@@ -15,17 +15,15 @@ global theming.
 
 ## Evidence
 
-- `src/App.css` — font-size values spread across the file (e.g. lines 44,
-  122, 131, 156, 241, 251, 367, 374, 388, 398, 456, 465, 572, 580, 596,
-  654, 679, 729, 738, 815, 854, 876, 931, 940, 967, 974, 1016, 1031,
-  1069, 1087, 1094, 1153, 1164, 1278, 1313, 1361, 1389, 1394, 1404, 1587,
-  1626, 1678, 1689, 1756, 1770).
-- `src/App.css` — border-radius values at lines 68, 117, 152, 181, 229,
-  281, 301, 326, 351, 359, 385, 432, 452, 496, 523, 601, 615, 648, 718,
-  771, 833, 850, 871, 918, 944, 984, 997, 1006, 1029, 1052, 1068, 1130,
-  1138, 1178, 1210, 1256, 1296, 1325, 1357, 1423, 1443, 1452, 1489, 1516,
-  1536, 1550, 1580, 1612, 1642, 1697, 1719, 1752.
-- `src/App.tsx:222-239` — inline `PlusIcon` / `CloseIcon` SVGs vs
+- `src/App.css` — no type scale: **58 `font-size` declarations using 21
+  distinct values** (`0.6rem`, `0.64rem`, `0.68rem`, `0.7rem`, `0.72rem`,
+  `0.74rem`, `0.75rem`, `0.78rem`, `0.8rem`, `0.82rem`, `0.85rem`, `0.9rem`,
+  `0.92rem`, `0.95rem`, `0.98rem`, `1.05rem`, `1.1rem`, `1.2rem`, `1.25rem`,
+  `1.6rem`, `16px`).
+- `src/App.css` — **58 `border-radius` declarations using 10 distinct
+  values** (`6px`, `7px`, `8px`, `10px`, `12px`, `14px`, `26px`, `50%`,
+  `999px`, `inherit`) with no scale mapping size to radius.
+- `src/App.tsx:224-241` — inline `PlusIcon` / `CloseIcon` SVGs vs
   `@phosphor-icons/react` everywhere else.
 
 ## Impact

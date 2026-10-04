@@ -13,13 +13,13 @@ state change happens.
 
 ## Evidence
 
-- `src/App.tsx:1033-1050` — queue refetch is keyed on `queueSig` =
+- `src/App.tsx:1064-1070` — queue refetch is keyed on `queueSig` =
   `` `${index}|${listLen}|${shuffle}` `` only.
 - `crates/player/src/player.rs:509-514` — `apply_reshuffle` swaps in a new
   permutation and emits state; `index`, `listLen`, and `shuffle` are all
   unchanged, so `queueSig` does not change.
 - Manual reorder is safe because `onReorderQueue` refetches explicitly
-  (`src/App.tsx:1252`).
+  (`src/App.tsx:1280-1282`).
 
 ## Impact
 

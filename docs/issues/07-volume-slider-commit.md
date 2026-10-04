@@ -8,10 +8,8 @@ status: "draft"
 ## Summary
 
 Dragging the volume slider fires one IPC invoke (`playerSetVolume`) per
-`input` event — dozens per second — each triggering an mpv command, a full
-`read_state()`, and a `player-state` emit that re-renders the app. The EQ
-and seek controls in the same file already use a correct draft-then-commit
-pattern; volume is the odd one out.
+`input` event — dozens per second. The EQ and seek controls in the same file
+already use a correct draft-then-commit pattern; volume is the odd one out.
 
 ## Evidence
 
@@ -20,13 +18,19 @@ pattern; volume is the odd one out.
 - `src/PlayerBar.tsx:165-190` — EQ uses `eqDraft` + commit on release.
 - `src/PlayerBar.tsx:146-151, 246-259` — seek uses `drag` state + commit on
   pointer/key release.
-- Backend cost per call: `crates/player/src/player.rs` `set_volume` + full
-  `read_state()` + emit (≈4 Hz pump and sync per event).
+- Cost per event is **an IPC round trip plus a queue push**, not a synchronous
+  state read: `Player::set_volume` only pushes `Cmd::SetVolume`
+  (`crates/player/src/player.rs`), and the pump drains the queue and emits on
+  its own `TICK_EVERY = 100 ms` cadence (`:46`, used at `:706`). So the
+  backend is not doing a `read_state()` per event — the waste is purely the
+  invoke rate from the frontend, which is why fixing it needs no backend
+  change.
 
 ## Impact
 
-UI churn and IPC volume during drag; on lower-end machines this contends
-with the pump while hi-res audio is playing.
+IPC chatter and re-render pressure during a drag; on lower-end machines this
+contends with the pump while hi-res audio is playing. The audio path itself is
+already batched by the queue, so this is churn, not glitch.
 
 ## Suggested direction
 

@@ -14,12 +14,16 @@ claims the library is empty.
 
 ## Evidence
 
-- `src/App.tsx:1401-1411` — `isEmpty = showing.length === 0` with no check
-  on whether `query` is non-blank (Songs and grid views).
-- `src/App.tsx:1671-1683` — onboarding empty state branch renders when
-  `isEmpty`.
-- `src/App.tsx:1603` — "showing results for …" label only exists on the
-  non-empty path.
+- `src/App.tsx:1432-1442` — `isEmpty` is true whenever the filtered set is
+  empty. The song and grid branches (`:1440` `groups.length === 0`, `:1441`
+  `showing.length === 0`) carry **no `query` check**, so a search that matches
+  nothing is indistinguishable from an empty library. The playlist-detail
+  branch (`:1436`) already guards with `query.trim() === ""` — that guard is
+  the pattern to copy.
+- `src/App.tsx:1711` — the onboarding empty state ("Your music lives here")
+  renders on `isEmpty`, so it is what a no-match search shows.
+- `src/App.tsx:1643` — the "showing results for …" note exists, but only on
+  the non-empty path, so it cannot disambiguate the empty case.
 
 ## Impact
 
