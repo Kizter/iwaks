@@ -16,8 +16,9 @@ open, are the popover exception.
 
 - `docs/design.md` §4.4 `layout` — "sidebar + konten + player bar selalu
   tampak + Now Playing (art besar, lirik)".
-- `src/App.tsx:51-61` — `View` union has songs/albums/artists/folders/
-  playlists/queue/album/artist/folder — **no `now-playing`** state.
+- `src/App.tsx:53-64` — `View` union has songs/albums/artists/folders/
+  playlists/queue/album/artist/folder/settings — **no `now-playing`** state.
+  (`settings` arrived with the Discord cover-art work; the gap is unchanged.)
 - `src/PlayerBar.tsx` — 56 px bar is the entire now-playing surface.
 
 ## Impact
@@ -34,6 +35,9 @@ album art, and lyrics live in a small popover.
    `N`); respect `prefers-reduced-motion` for entrance transitions.
 3. Reuse existing state/events — no new player commands needed (frontend
    slice, per repo pattern).
+4. Art source: embedded art only, as today — or also the online album-art URL
+   when the Discord cover flag is on. Decide deliberately; the fallback tile
+   must cover albums with neither.
 
 ## Definition of Done
 
