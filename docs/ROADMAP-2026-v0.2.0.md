@@ -89,6 +89,7 @@ stops misleading (search results, column alignment, labels, contrast).
 | 11 | P3 | polish | `11-visual-consistency-polish` | enhancement, priority:P3 |
 | 12 | P3 | polish | `12-edge-cases-data-hygiene` | bug, priority:P3 |
 
+- [ ] **13** YT Music fallback for cover art lookup (provider abstraction) ([#13](https://github.com/Kizter/iwaks/issues/13))
 ## How to publish
 
 1. Create labels (once): `bug`, `enhancement`, `roadmap`,
