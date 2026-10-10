@@ -29,7 +29,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::thread::{JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
 use iwaks_core::track::Track;
@@ -216,6 +216,10 @@ pub struct Player {
     /// [`PlayerState::queue_version`].
     queue_version: AtomicU64,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Id of the pump thread, recorded at spawn. `shutdown` compares it against
+    /// the caller: a `Drop` that runs *on* the pump thread (the last `Arc`
+    /// released there after a failed `start`) must detach, not join itself.
+    pump_thread: Mutex<Option<ThreadId>>,
     stopped: AtomicBool,
     shut_down: AtomicBool,
     cancelled: AtomicBool,
@@ -256,6 +260,7 @@ impl Player {
             shuffle_seed: AtomicU64::new(0xDEADBEEF),
             queue_version: AtomicU64::new(1),
             thread: Mutex::new(None),
+            pump_thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
             shut_down: AtomicBool::new(false),
             cancelled: AtomicBool::new(false),
@@ -277,7 +282,9 @@ impl Player {
                 }
             }
         });
+        let pump_id = handle.thread().id();
         *player.thread.lock().unwrap() = Some(handle);
+        *player.pump_thread.lock().unwrap() = Some(pump_id);
 
         match ready_rx.recv_timeout(Duration::from_secs(30)) {
             Ok(Ok(())) => Ok(player),
@@ -488,8 +495,18 @@ impl Player {
         }
         self.cancelled.store(true, Ordering::SeqCst);
         if let Some(handle) = self.thread.lock().unwrap().take() {
-            // The pump's wait_event times out ≤100 ms, so join returns fast.
-            let _ = handle.join();
+            // If we are *on* the pump thread, the last `Arc` was dropped there
+            // (a failed/timed-out `start` racing the caller's drop). Joining
+            // would block on ourselves forever; the thread is already exiting,
+            // so just detach by dropping the handle.
+            let on_pump_thread =
+                *self.pump_thread.lock().unwrap() == Some(std::thread::current().id());
+            if on_pump_thread {
+                drop(handle);
+            } else {
+                // The pump's wait_event times out ≤100 ms, so join returns fast.
+                let _ = handle.join();
+            }
         }
         self.stopped.store(true, Ordering::SeqCst);
     }
@@ -849,6 +866,73 @@ mod tests {
         }
         eprintln!("SKIP: no libmpv DLL on this machine");
         false
+    }
+
+    /// A `Player` with no libmpv handle, for exercising `shutdown`/`Drop`
+    /// without a working audio backend.
+    fn bare_player(thread: Option<JoinHandle<()>>, pump_thread: Option<ThreadId>) -> Player {
+        Player {
+            api: Mutex::new(None),
+            state: Mutex::new(PlayerState {
+                current: None,
+                index: None,
+                list_len: 0,
+                position: 0.0,
+                duration: 0.0,
+                paused: true,
+                stopped: false,
+                volume: 80,
+                mute: false,
+                repeat: RepeatMode::Off,
+                shuffle: false,
+                queue_version: 1,
+                speed: 1.0,
+                sleep_remaining: None,
+                eq_preamp: 0.0,
+                eq: vec![0.0; EQ_BANDS.len()],
+                replaygain: ReplayGainMode::Track,
+            }),
+            tracks: Mutex::new(Vec::new()),
+            queue: Mutex::new(Queue::new(0)),
+            sink: Mutex::new(None),
+            commands: Mutex::new(VecDeque::new()),
+            sleep_deadline: Mutex::new(None),
+            eq: Mutex::new(EqSettings::default()),
+            replaygain: Mutex::new(ReplayGainMode::Track),
+            shuffle_seed: AtomicU64::new(1),
+            queue_version: AtomicU64::new(1),
+            thread: Mutex::new(thread),
+            pump_thread: Mutex::new(pump_thread),
+            stopped: AtomicBool::new(false),
+            shut_down: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    /// The last `Arc<Player>` can be released *on the pump thread* when `start`
+    /// fails and the caller drops first. `Drop` → `shutdown` must then detach,
+    /// not join the thread it is running on (which would hang forever).
+    #[test]
+    fn shutdown_on_pump_thread_detaches_instead_of_self_joining() {
+        // Stand-in pump thread that stays alive until released; a buggy
+        // `shutdown` would `join` it and block here.
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let pump = std::thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+
+        // Record *this* thread as the pump thread, so `shutdown` sees the
+        // self-join condition.
+        let player = bare_player(Some(pump), Some(std::thread::current().id()));
+
+        let started = Instant::now();
+        player.shutdown();
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "shutdown must detach, not join the still-running pump thread from itself"
+        );
+
+        let _ = release_tx.send(()); // let the detached thread exit cleanly
     }
 
     fn write_wav(path: &Path, seconds: f64) {

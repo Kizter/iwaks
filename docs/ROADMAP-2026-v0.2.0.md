@@ -49,9 +49,9 @@ stops misleading (search results, column alignment, labels, contrast).
 
 - [ ] **01** Persist player settings & restore last session
       <!-- docs/issues/01-persistence-settings.md -->
-- [ ] **02** Scope `clean_missing` prune to scanned root; never prune on IO
+- [x] **02** Scope `clean_missing` prune to scanned root; never prune on IO
       errors <!-- docs/issues/02-scan-clean-missing-scope.md -->
-- [ ] **03** Fix self-join deadlock when `Player::start` fails
+- [x] **03** Fix self-join deadlock when `Player::start` fails
       <!-- docs/issues/03-player-start-deadlock.md -->
 - [x] **04** Empty state distinguishes "no results" from "empty library"
       <!-- docs/issues/04-empty-state-search-results.md -->

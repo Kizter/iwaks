@@ -2,7 +2,7 @@
 title: "Fix self-join deadlock when `Player::start` fails (libmpv init / 30s timeout)"
 labels: ["bug", "priority:P1", "area:player"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -42,10 +42,24 @@ playback-unavailable UI is meant to handle gracefully.
 
 ## Definition of Done
 
-- [ ] Simulated init failure (and timeout) exits cleanly, no hang, no leaked
+- [x] Simulated init failure (and timeout) exits cleanly, no hang, no leaked
       thread
-- [ ] Normal shutdown path unchanged (deterministic, idempotent)
-- [ ] Tests for both failure paths (≥80% area coverage)
+- [x] Normal shutdown path unchanged (deterministic, idempotent)
+- [x] Tests for both failure paths (≥80% area coverage)
+
+## Outcome
+
+Implemented by suggested direction 1: `Player` records the pump thread's
+`ThreadId` at spawn (`pump_thread`). `shutdown()` compares it with the caller
+and **detaches** (drops the `JoinHandle`) when they match — the case where the
+last `Arc` is released on the pump thread after a failed/timed-out `start` —
+instead of joining itself. The normal path (join) is unchanged.
+
+- `crates/player/src/player.rs` — `pump_thread` field, id recorded in `start`,
+  self-join guard in `shutdown`, and the unit test
+  `shutdown_on_pump_thread_detaches_instead_of_self_joining` (a bare `Player`
+  with a still-running stand-in pump thread; shutdown must return promptly
+  rather than join from the recorded pump thread).
 
 ## References
 
