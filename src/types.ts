@@ -59,6 +59,8 @@ export interface PlayerState {
   repeat: RepeatMode;
   /** Shuffle on: the queue walks a random permutation of the list. */
   shuffle: boolean;
+  /** Bumped whenever the queue order changes (reshuffle/reorder/list swap). */
+  queueVersion: number;
   /** Playback-rate multiplier (0.25–4.0). */
   speed: number;
   /** Seconds left on the sleep timer, or `null` when none is armed. */

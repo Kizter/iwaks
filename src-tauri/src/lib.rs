@@ -34,8 +34,9 @@ struct ScanEvent {
     finished: bool,
 }
 
-const PLAYER_UNAVAILABLE: &str =
-    "Playback is unavailable — libmpv DLL missing or failed to initialize";
+// User-facing copy only: the specific cause (missing DLL, init failure) is
+// logged at startup, never shown in a banner.
+const PLAYER_UNAVAILABLE: &str = "Playback is unavailable right now.";
 
 /// Iwaks' Discord application id (public — not a secret). The Rich Presence
 /// session and the `discord-<id>://` protocol registration use this.
@@ -651,7 +652,7 @@ pub fn run() {
                 Ok(p) => Some(p),
                 Err(e) => {
                     eprintln!("player unavailable: {e}");
-                    let _ = app.emit("player-error", e);
+                    let _ = app.emit("player-error", PLAYER_UNAVAILABLE);
                     None
                 }
             };

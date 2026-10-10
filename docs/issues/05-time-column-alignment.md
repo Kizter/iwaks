@@ -2,7 +2,7 @@
 title: "Align list header \"Time\" with the duration column in all lists"
 labels: ["bug", "priority:P2", "area:ux"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary

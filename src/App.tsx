@@ -28,7 +28,7 @@ import {
   writeTags,
 } from "./api";
 import "./App.css";
-import { formatBadge, formatDuration, scanSummary } from "./format";
+import { formatBadge, formatDuration, friendlyError, scanSummary } from "./format";
 import { Cover } from "./Cover";
 import PlayerBar from "./PlayerBar";
 import Settings from "./Settings";
@@ -721,7 +721,7 @@ function TagEditor({
       });
       onSaved();
     } catch (err) {
-      setError(`Couldn't save tags — ${String(err)}`);
+      setError(`Couldn't save tags — ${friendlyError(err)}`);
       setSaving(false);
     }
   };
@@ -1018,7 +1018,7 @@ function App() {
       onError: (msg) => {
         if (disposed) return;
         setScanning(false);
-        setBanner(`Scan failed — ${msg}`);
+        setBanner(`Scan failed — ${friendlyError(msg)}`);
       },
     }).then((u) => {
       if (disposed) u();
@@ -1047,7 +1047,7 @@ function App() {
       },
       (msg) => {
         if (disposed) return;
-        setPlayerError(msg);
+        setPlayerError(friendlyError(msg));
       },
     ).then((u) => {
       if (disposed) u();
@@ -1059,12 +1059,13 @@ function App() {
     };
   }, []);
 
-  // Session queue: refetch whenever the playing position, list size, or
-  // shuffle state changes (the queued list itself only changes then).
+  // Session queue: refetch whenever the playing position, list size, shuffle
+  // state, or queue order (reshuffle/reorder) changes. `queueVersion` is the
+  // only signal for a reshuffle, where index/listLen/shuffle all stay put.
   const queueSig = useMemo(
     () =>
       playerState
-        ? `${playerState.index ?? "-"}|${playerState.listLen}|${playerState.shuffle}`
+        ? `${playerState.index ?? "-"}|${playerState.listLen}|${playerState.shuffle}|${playerState.queueVersion}`
         : "",
     [playerState],
   );
@@ -1108,7 +1109,7 @@ function App() {
   useEffect(() => {
     if (tracks === null && status === "loading") {
       const t = setTimeout(
-        () => getTracks().catch((e) => setLoadError(String(e))).finally(() => setStatus("ready")),
+        () => getTracks().catch((e) => setLoadError(friendlyError(e))).finally(() => setStatus("ready")),
         1200,
       );
       return () => clearTimeout(t);
@@ -1124,7 +1125,7 @@ function App() {
         if (alive) setPlaylists(l);
       })
       .catch((e) => {
-        if (alive) setBanner(`Couldn't load playlists — ${String(e)}`);
+        if (alive) setBanner(`Couldn't load playlists — ${friendlyError(e)}`);
       });
     return () => {
       alive = false;
@@ -1152,7 +1153,7 @@ function App() {
           tracks: detail,
         });
       } catch (e) {
-        if (alive) setBanner(`Couldn't load playlist — ${String(e)}`);
+        if (alive) setBanner(`Couldn't load playlist — ${friendlyError(e)}`);
       }
     })();
     return () => {
@@ -1192,7 +1193,7 @@ function App() {
         setPlDetail({ name: current.name, tracks: detail ?? [] });
       }
     } catch (e) {
-      setBanner(`Playlist update failed — ${String(e)}`);
+      setBanner(`Playlist update failed — ${friendlyError(e)}`);
     }
   }, [view]);
 
@@ -1204,7 +1205,7 @@ function App() {
         await refreshPlaylists();
         setView({ kind: "playlist", id });
       } catch (e) {
-        setBanner(`Couldn't create playlist — ${String(e)}`);
+        setBanner(`Couldn't create playlist — ${friendlyError(e)}`);
       }
     },
     [refreshPlaylists],
@@ -1218,7 +1219,7 @@ function App() {
         setRenaming(false);
         await refreshPlaylists();
       } catch (e) {
-        setBanner(`Rename failed — ${String(e)}`);
+        setBanner(`Rename failed — ${friendlyError(e)}`);
       }
     },
     [view, refreshPlaylists],
@@ -1233,7 +1234,7 @@ function App() {
       await refreshPlaylists();
       setView({ kind: "playlist", id });
     } catch (e) {
-      setBanner(`Import failed — ${String(e)}`);
+      setBanner(`Import failed — ${friendlyError(e)}`);
     }
   }, [refreshPlaylists]);
 
@@ -1246,7 +1247,7 @@ function App() {
       await exportM3u(view.id, picked);
       setBanner("Playlist exported");
     } catch (e) {
-      setBanner(`Export failed — ${String(e)}`);
+      setBanner(`Export failed — ${friendlyError(e)}`);
     }
   }, [view, playlists]);
 
@@ -1260,7 +1261,7 @@ function App() {
       setView({ kind: "playlists" });
       await refreshPlaylists();
     } catch (e) {
-      setBanner(`Delete failed — ${String(e)}`);
+      setBanner(`Delete failed — ${friendlyError(e)}`);
     }
   }, [view, playlists, refreshPlaylists]);
 
@@ -1271,7 +1272,7 @@ function App() {
         await removeFromPlaylist(view.id, track.id);
         await refreshPlaylists();
       } catch (e) {
-        setBanner(`Couldn't remove track — ${String(e)}`);
+        setBanner(`Couldn't remove track — ${friendlyError(e)}`);
       }
     },
     [view, refreshPlaylists],
@@ -1282,7 +1283,7 @@ function App() {
       await reorderQueue(from, to);
       setQueue(await getQueue());
     } catch (e) {
-      setBanner(`Reorder failed — ${String(e)}`);
+      setBanner(`Reorder failed — ${friendlyError(e)}`);
     }
   }, []);
 
@@ -1295,7 +1296,7 @@ function App() {
         await refreshPlaylists();
         setView({ kind: "playlist", id });
       } catch (e) {
-        setBanner(`Couldn't save queue — ${String(e)}`);
+        setBanner(`Couldn't save queue — ${friendlyError(e)}`);
       }
     },
     [refreshPlaylists],
@@ -1311,7 +1312,7 @@ function App() {
         setAddTarget(null);
         await refreshPlaylists();
       } catch (e) {
-        setBanner(`Couldn't add track — ${String(e)}`);
+        setBanner(`Couldn't add track — ${friendlyError(e)}`);
       }
     },
     [addTarget, refreshPlaylists],
@@ -1329,7 +1330,7 @@ function App() {
         await refreshPlaylists();
         setView({ kind: "playlist", id });
       } catch (e) {
-        setBanner(`Couldn't add track — ${String(e)}`);
+        setBanner(`Couldn't add track — ${friendlyError(e)}`);
       }
     },
     [addTarget, refreshPlaylists],
@@ -1346,7 +1347,7 @@ function App() {
       await scanFolder(folder);
     } catch (e) {
       setScanning(false);
-      setBanner(`Couldn't start a scan — ${String(e)}`);
+      setBanner(`Couldn't start a scan — ${friendlyError(e)}`);
     }
   }, []);
 
@@ -1364,7 +1365,7 @@ function App() {
       );
       setRefreshKey((k) => k + 1); // bring the new rows into the list
     } catch (e) {
-      setBanner(`Couldn't add files — ${String(e)}`);
+      setBanner(`Couldn't add files — ${friendlyError(e)}`);
     } finally {
       setAdding(false);
     }
@@ -1429,17 +1430,26 @@ function App() {
   const filteredPlTracks =
     isPlaylistDetail && plDetail ? plDetail.tracks.filter((t) => matches(t, query)) : null;
   const ready = status === "ready" && tracks !== null;
+  const hasQuery = query.trim() !== "";
+  // Onboarding ("Your music lives here") is only for a genuinely empty
+  // library — never for a search that returned nothing.
   const isEmpty = ready
     ? isPlaylists
       ? playlists !== null && playlists.length === 0
       : isPlaylistDetail
-        ? plDetail !== null && plDetail.tracks.length === 0 && query.trim() === ""
+        ? plDetail !== null && plDetail.tracks.length === 0 && !hasQuery
         : isQueue
           ? false // the queue renders its own empty state below
-          : isGrid
-            ? groups.length === 0
-            : showing.length === 0
+          : !hasQuery && (isGrid ? groups.length === 0 : showing.length === 0)
     : false;
+  // A search/filter matched nothing: distinct from both the onboarding empty
+  // state and an empty playlist.
+  const noResults =
+    ready &&
+    hasQuery &&
+    (isPlaylistDetail
+      ? (filteredPlTracks?.length ?? 0) === 0
+      : !isQueue && !isPlaylists && (isGrid ? groups.length === 0 : showing.length === 0));
   const activeTracks = filteredPlTracks ?? groupTracks ?? showing;
 
   const onPlay = useCallback(
@@ -1660,12 +1670,21 @@ function App() {
         </div>
       )}
 
-      {!isGrid && !isPlaylists && !(groupKind === "folder" && (folderChildren?.length ?? 0) > 0) && (
-        <div className="track-head" aria-hidden="true">
-          <span>Title</span>
-          <span className="track-head-dur">Time</span>
-        </div>
-      )}
+      {!isGrid && !isPlaylists && !(groupKind === "folder" && (folderChildren?.length ?? 0) > 0) &&
+        (isQueue ? (
+          <div className="queue-head">
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span>Title</span>
+            <span className="queue-head-dur">Time</span>
+          </div>
+        ) : (
+          <div className="track-head">
+            <span aria-hidden="true" />
+            <span>Title</span>
+            <span className="track-head-dur">Time</span>
+          </div>
+        ))}
 
       <div className="list-wrap">
         {status === "loading" && tracks === null ? (
@@ -1708,6 +1727,15 @@ function App() {
             playingPath={playerState?.current?.path ?? null}
             onReorder={(from, to) => void onReorderQueue(from, to)}
           />
+        ) : noResults ? (
+          <div className="empty no-results">
+            <MagnifyingGlass className="empty-mark-icon" size={34} aria-hidden="true" />
+            <h2>{`No results for “${query.trim()}”`}</h2>
+            <p>Check the spelling, or try a different song, artist, or album.</p>
+            <button className="btn-ghost" onClick={() => setQuery("")}>
+              Clear search
+            </button>
+          </div>
         ) : isEmpty ? (
           <div className="empty">
             <img className="empty-mark" src={iwaksMark} alt="" />
@@ -1765,8 +1793,6 @@ function App() {
               </button>
             ))}
           </div>
-        ) : isPlaylistDetail && filteredPlTracks && filteredPlTracks.length === 0 ? (
-          <p className="scan-note">No tracks in this playlist match your search.</p>
         ) : isPlaylistDetail && filteredPlTracks ? (
           <TrackList
             tracks={filteredPlTracks}

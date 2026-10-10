@@ -68,6 +68,7 @@ function fmtDb(v: number): string {
 /** Always-visible bottom bar: now-playing, transport, seek, repeat, volume. */
 export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const [drag, setDrag] = useState<number | null>(null);
+  const [volDraft, setVolDraft] = useState<number | null>(null);
   const [sleepChoice, setSleepChoice] = useState("off");
   const [eqOpen, setEqOpen] = useState(false);
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
@@ -81,6 +82,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const position = state?.position ?? 0;
   const shownPos = drag !== null ? drag : Math.min(position, duration || 0);
   const volume = state?.volume ?? 0;
+  const shownVolume = volDraft ?? volume;
   const repeat = state?.repeat ?? "off";
   const shuffle = state?.shuffle ?? false;
   const mute = state?.mute ?? false;
@@ -187,6 +189,14 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
   const resetEq = () => {
     setEqDraft(null);
     void playerSetEq(0, [...EQ_ZERO]);
+  };
+
+  /** Fire the pending volume change once, on release (pointer/key) or blur. */
+  const commitVolume = () => {
+    if (volDraft !== null) {
+      void playerSetVolume(volDraft);
+      setVolDraft(null);
+    }
   };
 
   return (
@@ -482,10 +492,15 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           min={0}
           max={100}
           step={1}
-          value={volume}
+          value={shownVolume}
           disabled={!state}
           aria-label="Volume"
-          onChange={(e) => void playerSetVolume(Number(e.target.value))}
+          // Draft-then-commit (mirrors the EQ/seek sliders): the thumb follows
+          // the local value during a drag, one IPC invoke lands on release.
+          onChange={(e) => setVolDraft(Number(e.target.value))}
+          onPointerUp={commitVolume}
+          onKeyUp={commitVolume}
+          onBlur={commitVolume}
         />
       </div>
     </footer>

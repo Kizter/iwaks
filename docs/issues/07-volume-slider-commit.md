@@ -2,7 +2,7 @@
 title: "Commit volume slider changes on release, not on every input event"
 labels: ["enhancement", "priority:P2", "area:player"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -40,9 +40,15 @@ already batched by the queue, so this is churn, not glitch.
 
 ## Definition of Done
 
-- [ ] A full drag produces ≤2 IPC invokes (start state change + commit)
-- [ ] Keyboard (arrows) volume changes still work
-- [ ] No flicker: thumb follows local draft immediately
+- [x] A full drag produces ≤2 IPC invokes (start state change + commit)
+- [x] Keyboard (arrows) volume changes still work
+- [x] No flicker: thumb follows local draft immediately
+
+## Outcome
+
+`PlayerBar` now keeps a `volDraft` and commits once on `pointerup` / `keyup` /
+`blur` (mirrors the EQ/seek sliders); the range input is bound to the draft so
+the thumb tracks the drag. No backend change was needed.
 
 ## References
 

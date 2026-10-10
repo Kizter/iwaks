@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiscordLogo } from "@phosphor-icons/react";
 import { getOnlineCover, setOnlineCover } from "./api";
+import { friendlyError } from "./format";
 
 /** Settings surface: one row per persisted flag, nothing that scans or plays. */
 export default function Settings() {
@@ -33,7 +34,7 @@ export default function Settings() {
     void setOnlineCover(next)
       .catch((e: unknown) => {
         setOnline(previous);
-        setError(String(e));
+        setError(`Couldn't save that setting — ${friendlyError(e)}`);
       })
       .finally(() => setSaving(false));
   };

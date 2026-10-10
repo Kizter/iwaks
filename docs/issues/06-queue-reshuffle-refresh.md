@@ -2,7 +2,7 @@
 title: "Refresh the Queue view after reshuffle (queue signature misses permutation order)"
 labels: ["bug", "priority:P2", "area:ux"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -34,9 +34,18 @@ coincidental state change; users infer the wrong next track.
 
 ## Definition of Done
 
-- [ ] After dice-reshuffle, the Queue view order matches the real play order
+- [x] After dice-reshuffle, the Queue view order matches the real play order
       immediately
-- [ ] No extra refetch on ordinary ticks (no per-tick IPC churn)
+- [x] No extra refetch on ordinary ticks (no per-tick IPC churn)
+
+## Outcome
+
+Implemented by suggested direction 1: `PlayerState.queueVersion` is a
+monotonic counter bumped on every queue-order mutation (reshuffle, reorder,
+shuffle toggle, list swap) and included in the frontend `queueSig`. Ordinary
+ticks leave it untouched, so there is no per-tick refetch. Covered by the
+`reshuffle_bumps_queue_version_so_the_view_can_refetch` test in
+`crates/player/src/player.rs`.
 
 ## References
 

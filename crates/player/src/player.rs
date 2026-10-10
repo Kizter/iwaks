@@ -75,6 +75,11 @@ pub struct PlayerState {
     pub repeat: RepeatMode,
     /// Shuffle on: the queue walks a permutation of the list.
     pub shuffle: bool,
+    /// Bumped whenever the queue order changes (reshuffle, manual reorder,
+    /// shuffle toggle, or a fresh list). `index`/`list_len`/`shuffle` can all
+    /// stay the same across a reshuffle, so the Queue view keys on this to
+    /// refetch; ordinary ticks leave it untouched (no per-tick churn).
+    pub queue_version: u64,
     /// Playback-rate multiplier (mpv `speed` property); clamped to 0.25–4.0.
     pub speed: f64,
     /// Seconds left on the sleep timer; `None` when no timer is armed.
@@ -207,6 +212,9 @@ pub struct Player {
     /// Monotonic seed source for shuffle permutations (SplitMix64 steps so
     /// consecutive seeds are unrelated).
     shuffle_seed: AtomicU64,
+    /// Monotonic counter bumped on every queue-order mutation; surfaced as
+    /// [`PlayerState::queue_version`].
+    queue_version: AtomicU64,
     thread: Mutex<Option<JoinHandle<()>>>,
     stopped: AtomicBool,
     shut_down: AtomicBool,
@@ -231,6 +239,7 @@ impl Player {
                 mute: false,
                 repeat: RepeatMode::Off,
                 shuffle: false,
+                queue_version: 1,
                 speed: 1.0,
                 sleep_remaining: None,
                 eq_preamp: 0.0,
@@ -245,6 +254,7 @@ impl Player {
             eq: Mutex::new(EqSettings::default()),
             replaygain: Mutex::new(ReplayGainMode::Track),
             shuffle_seed: AtomicU64::new(0xDEADBEEF),
+            queue_version: AtomicU64::new(1),
             thread: Mutex::new(None),
             stopped: AtomicBool::new(false),
             shut_down: AtomicBool::new(false),
@@ -335,6 +345,7 @@ impl Player {
         }
         *self.tracks.lock().unwrap() = tracks;
         *self.queue.lock().unwrap() = queue.start(index);
+        self.bump_queue_version();
         self.push(Cmd::Load(index));
     }
 
@@ -443,7 +454,14 @@ impl Player {
     pub fn reorder_queue(&self, from: usize, to: usize) {
         let next = self.queue.lock().unwrap().reorder(from, to);
         *self.queue.lock().unwrap() = next;
+        self.bump_queue_version();
         self.push(Cmd::Refresh);
+    }
+
+    /// Record that the queue order changed; the next emitted state carries a
+    /// new [`PlayerState::queue_version`] so the Queue view refetches.
+    fn bump_queue_version(&self) {
+        self.queue_version.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Next unique shuffle seed: monotonic SplitMix64 steps, so consecutive
@@ -501,6 +519,7 @@ impl Player {
             }
         };
         *self.queue.lock().unwrap() = next;
+        self.bump_queue_version();
         self.emit();
     }
 
@@ -510,6 +529,7 @@ impl Player {
         let seed = self.next_shuffle_seed();
         let next = self.queue.lock().unwrap().reshuffle(seed);
         *self.queue.lock().unwrap() = next;
+        self.bump_queue_version();
         self.emit();
     }
 
@@ -801,6 +821,7 @@ impl Player {
             mute,
             repeat: queue.repeat,
             shuffle: queue.shuffle,
+            queue_version: self.queue_version.load(Ordering::Relaxed),
             speed,
             sleep_remaining,
             eq_preamp,
@@ -1392,6 +1413,45 @@ mod tests {
             Some("A"),
             "current stays pinned at the front"
         );
+        player.shutdown();
+    }
+
+    #[test]
+    fn reshuffle_bumps_queue_version_so_the_view_can_refetch() {
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("reshuffle-version");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        let c = dir.join("c.wav");
+        let d = dir.join("d.wav");
+        for p in [&a, &b, &c, &d] {
+            write_wav(p, 2.0);
+        }
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 2.0),
+            track(b.to_str().unwrap(), "B", 2.0),
+            track(c.to_str().unwrap(), "C", 2.0),
+            track(d.to_str().unwrap(), "D", 2.0),
+        ];
+
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        player.set_shuffle(true);
+        wait_for(&player, Duration::from_secs(5), |s| s.shuffle).expect("shuffle on");
+
+        let before = player.snapshot();
+        player.reshuffle();
+        // A reshuffle leaves index/listLen/shuffle untouched — `queue_version`
+        // is the Queue view's only cue to refetch.
+        let after = wait_for(&player, Duration::from_secs(5), |s| {
+            s.queue_version > before.queue_version
+        })
+        .expect("reshuffle advances queue_version");
+        assert_eq!(after.index, before.index, "current position is unchanged");
+        assert_eq!(after.list_len, before.list_len);
+        assert!(after.shuffle);
         player.shutdown();
     }
 }

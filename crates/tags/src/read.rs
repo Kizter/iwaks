@@ -3,6 +3,8 @@
 use std::path::Path;
 
 use iwaks_core::track::AudioMetadata;
+use lofty::config::ParseOptions;
+use lofty::mp4::{Mp4Codec, Mp4File};
 use lofty::prelude::*;
 
 use crate::TagError;
@@ -35,11 +37,38 @@ pub fn read_metadata(path: &Path) -> Result<AudioMetadata, TagError> {
 
 /// Canonical short format name from the file extension, e.g. "wav", "flac",
 /// "mp3". The scanner only reaches here for recognized extensions.
+///
+/// `.m4a`/`.mp4` are containers: the codec inside decides whether the file is
+/// lossless (ALAC) or lossy (AAC), so those report the detected codec instead
+/// of the bare extension.
 fn stream_format(path: &Path) -> String {
-    path.extension()
+    let ext = path
+        .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .unwrap_or_else(|| "audio".to_string())
+        .map(|e| e.to_lowercase());
+    match ext.as_deref() {
+        Some("m4a") | Some("m4b") | Some("mp4") => {
+            mp4_codec(path).unwrap_or_else(|| "m4a".to_string())
+        }
+        Some(other) => other.to_string(),
+        None => "audio".to_string(),
+    }
+}
+
+/// Detected codec inside an MP4-family container, as a short lowercase name
+/// (`alac`, `aac`, `mp3`, `flac`). `None` when the container can't be parsed —
+/// the caller then falls back to the neutral `m4a` label.
+fn mp4_codec(path: &Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mp4 = Mp4File::read_from(&mut file, ParseOptions::new()).ok()?;
+    let name = match mp4.properties().codec() {
+        Mp4Codec::ALAC => "alac",
+        Mp4Codec::AAC => "aac",
+        Mp4Codec::MP3 => "mp3",
+        Mp4Codec::FLAC => "flac",
+        _ => return None,
+    };
+    Some(name.to_string())
 }
 
 #[cfg(test)]

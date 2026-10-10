@@ -410,6 +410,10 @@ body {
   color: var(--text-dim);
 }
 
+.track-head > span:first-child {
+  visibility: hidden;
+}
+
 .track-head-dur {
   text-align: right;
 }
@@ -655,6 +659,13 @@ body {
   height: 120px;
   border-radius: 26px;
   box-shadow: 0 12px 28px var(--ink-a16);
+}
+.empty-mark-icon {
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+.no-results .btn-ghost {
+  margin-top: 4px;
 }
 
 .empty h2 {
@@ -1667,11 +1678,35 @@ input[type="range"]:disabled {
 
 /* ---------- session queue (M4 slice 2) ---------- */
 
+.queue-head,
 .queue-row {
-  /* position number · cover · main · meta(+now-playing, +handle) */
+  /* position number — cover — main — meta(+now-playing, +handle) */
   grid-template-columns: 28px 44px 1fr 240px;
   cursor: grab;
 }
+
+.queue-head {
+  display: grid;
+  gap: 12px;
+  padding: 0 16px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.queue-head > span:first-child,
+.queue-head > span:nth-child(2) {
+  visibility: hidden;
+}
+
+.queue-head-dur {
+  text-align: right;
+  grid-column: 4;
+}
+
 .queue-row:active {
   cursor: grabbing;
 }

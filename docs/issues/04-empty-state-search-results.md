@@ -2,7 +2,7 @@
 title: "Empty state must distinguish \"no search results\" from \"empty library\""
 labels: ["bug", "priority:P1", "area:ux"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -43,10 +43,20 @@ view.
 
 ## Definition of Done
 
-- [ ] Zero-result search shows a "No results" state, not onboarding
-- [ ] Truly empty library (no query) still shows onboarding
-- [ ] Copy strings in code (single source of truth)
+- [x] Zero-result search shows a "No results" state, not onboarding
+- [x] Truly empty library (no query) still shows onboarding
+- [x] Copy strings in code (single source of truth)
 - [ ] Frontend tests (vitest) cover both states
+
+## Outcome
+
+`isEmpty` (onboarding) is now gated on `!hasQuery`; a separate `noResults`
+flag renders a "No results for “<query>”" state with a Clear-search button
+for Songs, Albums/Artists/Folders, and playlist detail. The playlist-detail
+"no match" note was folded into the shared state for consistency.
+
+**Deferred:** the repo has no frontend test runner (no vitest/`@types/node`);
+adding one is a separate infra task tracked outside this issue.
 
 ## References
 
