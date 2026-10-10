@@ -2,7 +2,7 @@
 title: "Visual consistency polish: typography scale, radii tokens, single icon system"
 labels: ["enhancement", "priority:P3", "area:polish"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -41,10 +41,37 @@ requires touching dozens of declarations instead of a token.
 
 ## Definition of Done
 
-- [ ] All font-sizes and radii use tokens (custom props) — zero hardcoded
+- [x] All font-sizes and radii use tokens (custom props) — zero hardcoded
       values in components
-- [ ] No hand-rolled SVG icons remain (Phosphor only)
-- [ ] `npm run build` clean; screenshots unchanged in intent (visual check)
+- [x] No hand-rolled SVG icons remain (Phosphor only)
+- [x] `npm run build` clean; screenshots unchanged in intent (visual check)
+
+## Outcome
+
+Two token scales added to `:root`:
+
+- **Type** — `--font-xs 0.72rem`, `--font-sm 0.8rem`, `--font-md 0.85rem`,
+  `--font-base 0.9rem`, `--font-lg 0.95rem`, `--font-xl 1.05rem`,
+  `--font-2xl 1.25rem`, `--font-3xl 1.6rem`.
+- **Radius** — `--radius-xs 6px`, `--radius-sm 8px`, `--radius-md 10px`,
+  `--radius-lg 12px`, `--radius-xl 14px`, `--radius-2xl 26px`,
+  `--radius-pill 999px`, `--radius-circle 50%`.
+
+All **58** `font-size` declarations and **56** `border-radius` declarations
+now read from a token (up from 21/10 distinct values). The only literals left
+by design are the `:root` `font-size: 16px` rem baseline and
+`border-radius: inherit`. Mapped values move at most ~1px (e.g. `0.74rem →
+--font-sm`), so the visual diff is sub-pixel.
+
+Hand-rolled SVGs replaced with Phosphor:
+
+- `App.tsx` — `PlusIcon` → `Plus`, `CloseIcon` → `X`, `EditIcon` →
+  `PencilSimple`, `BackIcon` → `CaretLeft`, `GripIcon` → `DotsSixVertical`,
+  and the playlist-card art → `ListBullets`.
+- `Cover.tsx` — `NoteIcon` → `MusicNote` (keeps `className="cover-note"` so
+  the existing opacity/is-playing rules still apply).
+
+`npx tsc --noEmit` and `npm run build` are clean.
 
 ## References
 

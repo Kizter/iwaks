@@ -33,14 +33,19 @@ import { Cover } from "./Cover";
 import PlayerBar from "./PlayerBar";
 import Settings from "./Settings";
 import {
+  CaretLeft,
+  DotsSixVertical,
   Folder,
   GearSix,
   ListBullets,
   MagnifyingGlass,
   MusicNote,
+  PencilSimple,
+  Plus,
   Queue as QueueIcon,
   UserCircle,
   VinylRecord,
+  X,
   type Icon,
 } from "@phosphor-icons/react";
 import type { Playlist, PlayerState, ScanProgress, Track } from "./types";
@@ -223,33 +228,15 @@ function useSearch(query: string, refreshKey: number) {
 }
 
 function PlusIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-      <path fill="currentColor" d="M7 2h2v5h5v2H9v5H7V9H2V7h5z" />
-    </svg>
-  );
+  return <Plus size={13} aria-hidden="true" />;
 }
 
 function CloseIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="m4.6 3.5 3.4 3.4 3.4-3.4 1.1 1.1-3.4 3.4 3.4 3.4-1.1 1.1-3.4-3.4-3.4 3.4-1.1-1.1 3.4-3.4-3.4-3.4z"
-      />
-    </svg>
-  );
+  return <X size={11} aria-hidden="true" />;
 }
 
 function EditIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M12.1 2.3a1.6 1.6 0 0 0-2.3 0L3.4 8.7 3 11l.3.9.9.3 2.3-.4 6.4-6.4a1.6 1.6 0 0 0 0-2.3zM5.4 10.3l5.6-5.6.9.9-5.6 5.6-1.2.2.3-1.1z"
-      />
-    </svg>
-  );
+  return <PencilSimple size={12} aria-hidden="true" />;
 }
 
 function TrackRow({
@@ -346,11 +333,7 @@ function TrackRow({
 
 /** Back arrow for toolbar title when browsing inside a group. */
 function BackIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-      <path fill="currentColor" d="M9.8 3.4 5.2 8l4.6 4.6-1.1 1.1L3 8l5.7-5.7z" />
-    </svg>
-  );
+  return <CaretLeft size={15} aria-hidden="true" />;
 }
 
 /** Fixed-row-height virtualized list (hand-rolled — no dependency, React-19-safe). */
@@ -416,18 +399,7 @@ function TrackList({
 
 /** Six-dot grip shown on queue rows (drag to reorder). */
 function GripIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-      <g fill="currentColor">
-        <circle cx="5" cy="4" r="1.2" />
-        <circle cx="11" cy="4" r="1.2" />
-        <circle cx="5" cy="8" r="1.2" />
-        <circle cx="11" cy="8" r="1.2" />
-        <circle cx="5" cy="12" r="1.2" />
-        <circle cx="11" cy="12" r="1.2" />
-      </g>
-    </svg>
-  );
+  return <DotsSixVertical size={14} aria-hidden="true" />;
 }
 
 /**
@@ -1808,24 +1780,7 @@ function App() {
                 onClick={() => setView({ kind: "playlist", id: p.id })}
               >
                 <span className="playlist-art" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="30" height="30">
-                    <rect
-                      x="3"
-                      y="4"
-                      width="18"
-                      height="16"
-                      rx="3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                    />
-                    <path
-                      d="M8 9h8M8 13h8M8 17h5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
+                  <ListBullets size={30} aria-hidden="true" />
                 </span>
                 <span className="group-name">{p.name}</span>
                 <span className="group-sub">

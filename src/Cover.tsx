@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MusicNote } from "@phosphor-icons/react";
 import { readCover } from "./api";
 import type { Track } from "./types";
 
@@ -7,14 +8,7 @@ const coverCache = new Map<string, string | null>();
 
 /** Music-note fallback shown when a track has no embedded cover art. */
 export function NoteIcon() {
-  return (
-    <svg className="cover-note" viewBox="0 0 16 16" width="18" height="18" aria-hidden="true">
-      <path
-        fill="currentColor"
-        d="M7.5 2v9.2A2.1 2.1 0 1 0 9.1 13.1V3.1l4.4-1.03v7.5a2.1 2.1 0 1 0 1.6 2.06V1.3L7.5 2z"
-      />
-    </svg>
-  );
+  return <MusicNote className="cover-note" size={18} aria-hidden="true" />;
 }
 
 /** Track thumbnail: embedded art when present, else a colored note tile. */

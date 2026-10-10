@@ -67,7 +67,7 @@ stops misleading (search results, column alignment, labels, contrast).
       <!-- docs/issues/09-accessibility-pass.md -->
 - [ ] **10** Album-art-dominant Now Playing view
       <!-- docs/issues/10-now-playing-view.md -->
-- [ ] **11** Visual consistency (font scale, radii tokens, one icon system)
+- [x] **11** Visual consistency (font scale, radii tokens, one icon system)
       <!-- docs/issues/11-visual-consistency-polish.md -->
 - [x] **12** Edge cases (dup playlist names, path dedupe, seek-blur, m3u
       encoding) <!-- docs/issues/12-edge-cases-data-hygiene.md -->
