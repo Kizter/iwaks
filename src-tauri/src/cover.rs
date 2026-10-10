@@ -98,7 +98,7 @@ pub fn resolve_in_background(
     album: String,
 ) {
     std::thread::spawn(move || {
-        let url = resolve(&db_path, &key, &artist, &album, iwaks_cover::lookup);
+        let url = resolve(&db_path, &key, &artist, &album, iwaks_cover::lookup_chain);
         memo.lock().expect("cover memo").publish(&key, url);
     });
 }

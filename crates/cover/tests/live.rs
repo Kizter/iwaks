@@ -14,7 +14,7 @@
 //! leave the store. It asserts that a *known* release is still reachable and
 //! still yields a 600px artwork URL.
 
-use iwaks_cover::lookup;
+use iwaks_cover::{lookup, lookup_chain, CoverProvider, YtMusic};
 
 /// A release that has been on the store for years, used as the canary.
 const ARTIST: &str = "Crayon Case";
@@ -71,5 +71,39 @@ fn an_album_absent_from_the_store_is_an_answer_not_an_error() {
     assert!(
         matches!(outcome, Ok(None)),
         "expected a settled \"no match\", got {outcome:?}"
+    );
+}
+
+/// The fallback provider's *contract* — not any album's availability. The
+/// endpoint is unofficial, so this is the canary for the visitor-id scrape and
+/// the request shape breaking: it must still answer, not error.
+#[test]
+#[ignore = "performs a real network request"]
+fn the_youtube_music_provider_answers_a_request() {
+    let outcome = YtMusic.lookup(ARTIST, ALBUM);
+    match outcome {
+        Ok(Some(url)) => {
+            assert!(url.starts_with("https://"), "artwork URL: {url}");
+            println!("youtube music artwork: {url}");
+        }
+        Ok(None) => println!("youtube music answered with no match for {ARTIST} - {ALBUM}"),
+        Err(e) => panic!("the provider must answer, not fail: {e}"),
+    }
+}
+
+/// The chain keeps iTunes as the front of the line: for a release iTunes knows,
+/// it must resolve exactly as the bare `lookup` does.
+#[test]
+#[ignore = "performs a real network request"]
+fn the_chain_resolves_a_known_album_through_itunes() {
+    let chained = lookup_chain(ARTIST, ALBUM)
+        .expect("chain should be answerable")
+        .expect("this release should still be listed");
+    let itunes = lookup(ARTIST, ALBUM)
+        .expect("lookup should be answerable")
+        .expect("this release should still be listed");
+    assert_eq!(
+        chained, itunes,
+        "iTunes is first, so the chain must match it"
     );
 }

@@ -10,17 +10,28 @@
 //! public CDN. Verified against the live client: `i.ytimg.com` and
 //! `is1-ssl.mzstatic.com` artwork both display.
 //!
-//! Provider is Apple's public **iTunes Search API**: no key, no account, stable
-//! CDN URLs that do not expire, and real square cover art (unlike YouTube's
-//! 16:9 video thumbnails).
-
-use std::time::Duration;
+//! The default provider is Apple's public **iTunes Search API**: no key, no
+//! account, stable CDN URLs that do not expire, and real cover art. [`lookup`]
+//! is that provider, and is kept as the backwards-compatible entry point.
+//!
+//! [`lookup_chain`] additionally falls back to a best-effort **YouTube Music**
+//! provider — see [`provider`] for the chain semantics and [`ytmusic`] for the
+//! unofficial endpoint it uses.
 
 mod itunes;
+mod net;
+mod provider;
+mod ytmusic;
 
-/// Whole-request budget. The lookup runs off the playback path, so a slow or
-/// dead network must not pile up threads behind the sink.
-const TIMEOUT: Duration = Duration::from_secs(5);
+pub use provider::{CoverProvider, Fallback, Itunes, YtMusic};
+
+/// The default provider chain, in order: iTunes, then YouTube Music.
+///
+/// Only called by [`lookup_chain`]; the ordering is the feature, so it lives in
+/// one place and is asserted by a test.
+pub fn default_chain() -> Vec<Box<dyn CoverProvider>> {
+    vec![Box::new(Itunes), Box::new(YtMusic)]
+}
 
 /// Cache key for one album: normalized `artist` + `album`, so tag casing and
 /// whitespace variants share a cache row. `None` on either side yields an empty
@@ -51,13 +62,20 @@ pub enum CoverError {
     Malformed,
 }
 
-/// Look up cover art for `artist` / `album`.
+/// Look up cover art for `artist` / `album` with the default provider (iTunes).
 ///
 /// `Ok(None)` means the provider has no matching release — a fact worth
 /// remembering. `Err` means the question could not be answered at all, so the
 /// caller must ask again later.
 pub fn lookup(artist: &str, album: &str) -> Result<Option<String>, CoverError> {
-    lookup_with(fetch_itunes, artist, album)
+    lookup_with(net::get, artist, album)
+}
+
+/// Look up cover art across the default fallback chain (iTunes, then YouTube
+/// Music). Same success/error contract as [`lookup`], but a miss is only
+/// reported once every provider has answered.
+pub fn lookup_chain(artist: &str, album: &str) -> Result<Option<String>, CoverError> {
+    Fallback::new(default_chain()).lookup(artist, album)
 }
 
 /// Decision logic, with the HTTP fetch injected so it is testable offline.
@@ -72,23 +90,6 @@ fn lookup_with(
     let url = itunes::search_url(artist, album);
     let body = fetch(&url)?;
     itunes::pick_artwork(&body, artist, album)
-}
-
-/// The single `ureq` call in the workspace. Timeouts are bounded and every
-/// failure mode collapses to [`CoverError`].
-fn fetch_itunes(url: &str) -> Result<String, CoverError> {
-    let agent = ureq::Agent::config_builder()
-        .timeout_global(Some(TIMEOUT))
-        .build()
-        .new_agent();
-    match agent.get(url).call() {
-        Ok(mut response) => response
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| CoverError::Request(e.to_string())),
-        Err(ureq::Error::StatusCode(code)) => Err(CoverError::Request(format!("HTTP {code}"))),
-        Err(e) => Err(CoverError::Request(e.to_string())),
-    }
 }
 
 #[cfg(test)]

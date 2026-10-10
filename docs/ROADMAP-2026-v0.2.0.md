@@ -71,6 +71,9 @@ stops misleading (search results, column alignment, labels, contrast).
       <!-- docs/issues/11-visual-consistency-polish.md -->
 - [x] **12** Edge cases (dup playlist names, path dedupe, seek-blur, m3u
       encoding) <!-- docs/issues/12-edge-cases-data-hygiene.md -->
+- [x] **13** YT Music fallback for cover art lookup (provider abstraction)
+      ([#13](https://github.com/Kizter/iwaks/issues/13))
+      <!-- docs/issues/13-ytmusic-cover-fallback.md -->
 
 ## Issue index
 
@@ -88,8 +91,8 @@ stops misleading (search results, column alignment, labels, contrast).
 | 10 | P2 | ux | `10-now-playing-view` | enhancement, priority:P2 |
 | 11 | P3 | polish | `11-visual-consistency-polish` | enhancement, priority:P3 |
 | 12 | P3 | polish | `12-edge-cases-data-hygiene` | bug, priority:P3 |
+| 13 | P3 | player | `13-ytmusic-cover-fallback` | enhancement, priority:P3 |
 
-- [ ] **13** YT Music fallback for cover art lookup (provider abstraction) ([#13](https://github.com/Kizter/iwaks/issues/13))
 ## How to publish
 
 1. Create labels (once): `bug`, `enhancement`, `roadmap`,
