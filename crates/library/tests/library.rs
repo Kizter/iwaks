@@ -310,6 +310,48 @@ fn upsert_updated_row_is_searchable_with_new_title() {
     assert_eq!(lib.search("old").unwrap().len(), 0, "old token gone");
 }
 
+#[test]
+fn upsert_dedupes_case_and_separator_path_variants() {
+    let mut lib = Library::open(":memory:").expect("open");
+
+    let id = lib
+        .upsert_track(&fake_track(r"C:\Music\Album\a.flac", "First"))
+        .unwrap();
+    // The same physical file, spelled with `/` and a different case.
+    let id2 = lib
+        .upsert_track(&fake_track("c:/music/album/A.FLAC", "Second"))
+        .unwrap();
+
+    assert_eq!(id, id2, "the same file keeps one row id");
+    assert_eq!(lib.track_count().unwrap(), 1, "no duplicate row");
+    let t = &lib.all_tracks().unwrap()[0];
+    assert_eq!(t.title, "Second", "metadata updated");
+    assert_eq!(
+        t.path, "c:/music/album/A.FLAC",
+        "path re-keyed to the latest spelling"
+    );
+}
+
+#[test]
+fn upsert_rekey_keeps_playlist_membership() {
+    let mut lib = Library::open(":memory:").expect("open");
+    let id = lib
+        .upsert_track(&fake_track(r"C:\Music\a.flac", "A"))
+        .unwrap();
+    let pid = lib.create_playlist("P").unwrap();
+    lib.add_track_to_playlist(pid, id).unwrap();
+
+    lib.upsert_track(&fake_track("c:/music/a.flac", "A renamed"))
+        .unwrap();
+
+    assert_eq!(lib.track_count().unwrap(), 1);
+    assert_eq!(
+        lib.get_playlist(pid).unwrap().unwrap().track_count,
+        1,
+        "the playlist entry follows the re-keyed row"
+    );
+}
+
 // ---------- db basics ----------
 
 #[test]

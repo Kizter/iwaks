@@ -69,7 +69,7 @@ stops misleading (search results, column alignment, labels, contrast).
       <!-- docs/issues/10-now-playing-view.md -->
 - [ ] **11** Visual consistency (font scale, radii tokens, one icon system)
       <!-- docs/issues/11-visual-consistency-polish.md -->
-- [ ] **12** Edge cases (dup playlist names, path dedupe, seek-blur, m3u
+- [x] **12** Edge cases (dup playlist names, path dedupe, seek-blur, m3u
       encoding) <!-- docs/issues/12-edge-cases-data-hygiene.md -->
 
 ## Issue index

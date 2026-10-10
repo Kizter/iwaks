@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use iwaks_core::track::Track;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 /// Schema v1: denormalized tracks table + FTS5 external-content index.
 /// Albums/artists stay frontend-derived (grouping) — no join tables needed.
@@ -153,7 +153,12 @@ impl Library {
     }
 
     /// Insert or update a track by its unique `path`. Returns the row id.
+    ///
+    /// Uniqueness is decided on the *normalized* path (lowercase, `/`⇄`\`), so
+    /// a path that differs from the stored one only by case or separator
+    /// updates the same row instead of inserting a duplicate.
     pub fn upsert_track(&mut self, t: &Track) -> Result<i64, LibraryError> {
+        self.rekey_normalized_path(&t.path)?;
         self.conn
             .prepare(
                 "INSERT INTO tracks
@@ -194,6 +199,29 @@ impl Library {
                 |r| r.get(0),
             )
             .map_err(Into::into)
+    }
+
+    /// Move a stored row onto `path` when it already exists under a path that
+    /// differs only by case or separator. Keeps the row id (and therefore any
+    /// playlist membership) intact, so the following upsert updates it rather
+    /// than inserting a duplicate.
+    fn rekey_normalized_path(&mut self, path: &str) -> Result<(), LibraryError> {
+        let id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM tracks
+                 WHERE lower(replace(path, '\\', '/')) = lower(replace(?1, '\\', '/'))
+                   AND path <> ?1",
+                [path],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = id {
+            self.conn
+                .prepare("UPDATE tracks SET path = ?1 WHERE id = ?2")?
+                .execute(rusqlite::params![path, id])?;
+        }
+        Ok(())
     }
 
     /// All tracks, sorted by artist → album → title (case-insensitive).

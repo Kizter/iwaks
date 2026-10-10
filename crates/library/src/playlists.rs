@@ -29,6 +29,18 @@ fn clean_name(name: &str) -> Result<String, LibraryError> {
     Ok(trimmed.to_string())
 }
 
+/// Read a playlist file as text, tolerating the encodings found in the wild:
+/// a UTF-8 BOM is stripped, valid UTF-8 is kept as-is, and anything else is
+/// decoded as latin-1 (every byte maps to the same code point) rather than
+/// rejected. UTF-16 is not handled (its NUL bytes yield no resolvable paths).
+fn read_text_lossy(path: &Path) -> Result<String, LibraryError> {
+    let bytes = std::fs::read(path)?;
+    match String::from_utf8(bytes) {
+        Ok(s) => Ok(s.strip_prefix('\u{feff}').unwrap_or(&s).to_string()),
+        Err(e) => Ok(e.into_bytes().iter().map(|&b| b as char).collect()),
+    }
+}
+
 impl Library {
     fn playlist_exists(&self, id: i64) -> Result<bool, LibraryError> {
         Ok(self.conn().query_row(
@@ -38,25 +50,52 @@ impl Library {
         )?)
     }
 
-    /// Create a playlist; returns its row id.
+    /// Whether another playlist (excluding `exclude_id`) already uses `name`
+    /// case-insensitively.
+    fn playlist_name_taken(
+        &self,
+        name: &str,
+        exclude_id: Option<i64>,
+    ) -> Result<bool, LibraryError> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM playlists
+                           WHERE lower(name) = lower(?1)
+                             AND id <> coalesce(?2, -1))",
+            rusqlite::params![name, exclude_id],
+            |r| r.get::<_, bool>(0),
+        )?)
+    }
+
+    /// Create a playlist; returns its row id. Names are unique
+    /// case-insensitively.
     pub fn create_playlist(&mut self, name: &str) -> Result<i64, LibraryError> {
         let name = clean_name(name)?;
+        if self.playlist_name_taken(&name, None)? {
+            return Err(LibraryError::Invalid(format!(
+                "a playlist named \"{name}\" already exists"
+            )));
+        }
         self.conn()
             .prepare("INSERT INTO playlists (name) VALUES (?1)")?
             .execute([name])?;
         Ok(self.conn().last_insert_rowid())
     }
 
-    /// Rename a playlist (trimmed, non-empty). Errors when it doesn't exist.
+    /// Rename a playlist (trimmed, non-empty, unique case-insensitively).
+    /// Errors when it doesn't exist or the name collides.
     pub fn rename_playlist(&mut self, id: i64, name: &str) -> Result<(), LibraryError> {
         let name = clean_name(name)?;
-        let n = self
-            .conn()
-            .prepare("UPDATE playlists SET name = ?1 WHERE id = ?2")?
-            .execute(rusqlite::params![name, id])?;
-        if n == 0 {
+        if !self.playlist_exists(id)? {
             return Err(LibraryError::NotFound(format!("playlist {id}")));
         }
+        if self.playlist_name_taken(&name, Some(id))? {
+            return Err(LibraryError::Invalid(format!(
+                "a playlist named \"{name}\" already exists"
+            )));
+        }
+        self.conn()
+            .prepare("UPDATE playlists SET name = ?1 WHERE id = ?2")?
+            .execute(rusqlite::params![name, id])?;
         Ok(())
     }
 
@@ -227,7 +266,7 @@ impl Library {
     /// path outside the file's folder, unsupported entry) are skipped.
     /// Returns the new playlist id.
     pub fn import_m3u(&mut self, path: &Path) -> Result<i64, LibraryError> {
-        let content = std::fs::read_to_string(path)?;
+        let content = read_text_lossy(path)?;
         let base = path.parent().unwrap_or(Path::new("."));
         let name = path
             .file_stem()

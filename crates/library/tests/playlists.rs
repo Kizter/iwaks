@@ -72,6 +72,34 @@ fn rename_missing_playlist_is_not_found() {
 }
 
 #[test]
+fn create_and_rename_reject_duplicate_names() {
+    let mut lib = Library::open(":memory:").expect("open");
+    let a = lib.create_playlist("Mix").unwrap();
+
+    let err = lib.create_playlist("mix").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid input: a playlist named \"mix\" already exists"
+    );
+    assert_eq!(lib.list_playlists().unwrap().len(), 1, "no second row");
+
+    let b = lib.create_playlist("Other").unwrap();
+    assert!(
+        lib.rename_playlist(b, "MIX").is_err(),
+        "rename collides case-insensitively"
+    );
+    assert_eq!(
+        lib.get_playlist(b).unwrap().unwrap().name,
+        "Other",
+        "name unchanged after a failed rename"
+    );
+
+    // Renaming a playlist to its own name (even different case) is allowed.
+    lib.rename_playlist(a, "mix").unwrap();
+    assert_eq!(lib.get_playlist(a).unwrap().unwrap().name, "mix");
+}
+
+#[test]
 fn add_to_missing_playlist_is_not_found() {
     let mut lib = Library::open(":memory:").expect("open");
     insert_track(&mut lib, "C:/music/a.flac", "A");
@@ -223,6 +251,39 @@ fn import_m3u_skips_missing_entries() {
     assert_eq!(tracks.len(), 1, "only the resolvable entry is added");
     assert_eq!(tracks[0].id, a);
     assert_eq!(lib.get_playlist(pid).unwrap().unwrap().track_count, 1);
+}
+
+#[test]
+fn import_m3u_decodes_utf8_bom_and_latin1() {
+    let tmp = TempDir::new("m3u-encoding");
+    let mut lib = Library::open(":memory:").expect("open");
+    let track_path = tmp.path("café.flac");
+    insert_track(&mut lib, &track_path.to_string_lossy(), "Café");
+
+    // UTF-8 file with a BOM: the BOM is stripped, the path resolves.
+    let utf8 = tmp.path("utf8.m3u");
+    std::fs::write(
+        &utf8,
+        format!("\u{feff}#EXTM3U\n{}\n", track_path.to_string_lossy()),
+    )
+    .unwrap();
+    let pid = lib.import_m3u(&utf8).unwrap();
+    assert_eq!(lib.get_playlist_tracks(pid).unwrap().unwrap().len(), 1);
+
+    // latin-1 file: 'é' is the single byte 0xE9 (invalid UTF-8), which the
+    // lossy decoder maps back to the same code point.
+    let latin1 = tmp.path("latin1.m3u");
+    let bytes: Vec<u8> = format!("#EXTM3U\n{}\n", track_path.to_string_lossy())
+        .chars()
+        .map(|c| c as u8)
+        .collect();
+    std::fs::write(&latin1, bytes).unwrap();
+    let pid2 = lib.import_m3u(&latin1).unwrap();
+    assert_eq!(
+        lib.get_playlist_tracks(pid2).unwrap().unwrap().len(),
+        1,
+        "latin-1 m3u resolves the accented path"
+    );
 }
 
 #[test]

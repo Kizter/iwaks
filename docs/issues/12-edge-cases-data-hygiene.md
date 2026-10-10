@@ -2,7 +2,7 @@
 title: "Edge cases: duplicate playlist names, path-key dedupe, seek-on-blur, m3u encoding"
 labels: ["bug", "priority:P3", "area:polish"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -52,10 +52,31 @@ failures for non-ASCII playlists.
 
 ## Definition of Done
 
-- [ ] Creating a duplicate-named playlist errors with clear copy
-- [ ] No second row for the same file regardless of path case/separator
-- [ ] Seek drag committed or safely cancelled on every exit path
-- [ ] m3u import succeeds for UTF-8 and latin-1 (tests for both)
+- [x] Creating a duplicate-named playlist errors with clear copy
+- [x] No second row for the same file regardless of path case/separator
+- [x] Seek drag committed or safely cancelled on every exit path
+- [x] m3u import succeeds for UTF-8 and latin-1 (tests for both)
+
+## Outcome
+
+1. **Unique playlist names** — `create_playlist` / `rename_playlist` reject a
+   name already in use, case-insensitively, with
+   `a playlist named "<name>" already exists`. Implemented as a guard query
+   (`playlist_name_taken`) rather than a schema change: no migration, and the
+   m3u importer routes through `create_playlist` too.
+2. **Path-key dedupe** — `Library::upsert_track` now re-keys an existing row
+   whose path differs only by case/separator (`rekey_normalized_path`) before
+   the insert, so the row id and any playlist membership survive and no second
+   row appears. No migration needed.
+3. **Seek on blur** — the seek slider commits the pending value on `blur` and
+   `pointercancel` (was: `onBlur` discarded the drag).
+4. **m3u encoding** — `read_text_lossy` strips a UTF-8 BOM, keeps valid UTF-8,
+   and falls back to latin-1 for legacy files instead of failing.
+
+Tests: `upsert_dedupes_case_and_separator_path_variants`,
+`upsert_rekey_keeps_playlist_membership` (library); `import_m3u_decodes_utf8_bom_and_latin1`,
+`create_and_rename_reject_duplicate_names` (playlists). The seek fix is
+frontend-only and has no runner in the repo.
 
 ## References
 

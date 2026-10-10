@@ -265,7 +265,10 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
             onChange={(e) => setDrag(Number(e.target.value))}
             onPointerUp={commitSeek}
             onKeyUp={commitSeek}
-            onBlur={() => setDrag(null)}
+            // Commit a pending seek when focus leaves or the pointer is
+            // cancelled, instead of silently discarding the dragged value.
+            onBlur={commitSeek}
+            onPointerCancel={commitSeek}
           />
           <span>{formatDuration(duration * 1000)}</span>
         </div>
