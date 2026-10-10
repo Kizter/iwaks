@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub mod cover;
+pub mod persist;
 
 /// Shared application state. `Library` connections are opened per call,
 /// so this stays `Send + Sync`. The player is `None` when libmpv failed to
@@ -25,6 +26,8 @@ pub struct AppState {
     online_cover: Arc<AtomicBool>,
     /// Last resolved album art, shared with the lookup threads.
     cover_memo: cover::SharedMemo,
+    /// Debounced writer for player settings + last session (issue #01).
+    persist: persist::Persist,
 }
 
 /// Payload pushed to the frontend during / after a scan.
@@ -266,6 +269,7 @@ fn play_tracks(tracks: Vec<Track>, index: usize, state: State<'_, AppState>) -> 
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .play_tracks(tracks, index);
+    state.persist.touch();
     Ok(())
 }
 
@@ -282,6 +286,7 @@ fn next_track(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .next();
+    state.persist.touch();
     Ok(())
 }
 
@@ -290,6 +295,7 @@ fn prev_track(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .prev();
+    state.persist.touch();
     Ok(())
 }
 
@@ -298,6 +304,7 @@ fn seek(position: f64, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .seek(position);
+    state.persist.touch();
     Ok(())
 }
 
@@ -306,6 +313,7 @@ fn seek_relative(delta: f64, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .seek_relative(delta);
+    state.persist.touch();
     Ok(())
 }
 
@@ -314,6 +322,7 @@ fn set_volume(volume: i64, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_volume(volume);
+    state.persist.touch();
     Ok(())
 }
 
@@ -322,6 +331,7 @@ fn toggle_mute(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .toggle_mute();
+    state.persist.touch();
     Ok(())
 }
 
@@ -330,6 +340,7 @@ fn set_speed(speed: f64, state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_speed(speed);
+    state.persist.touch();
     Ok(())
 }
 
@@ -339,6 +350,7 @@ fn set_sleep_timer(seconds: Option<f64>, state: State<'_, AppState>) -> Result<(
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_sleep_timer(seconds);
+    state.persist.touch();
     Ok(())
 }
 
@@ -348,6 +360,7 @@ fn set_eq(preamp: f64, eq: Vec<f64>, state: State<'_, AppState>) -> Result<(), S
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_eq(preamp, eq);
+    state.persist.touch();
     Ok(())
 }
 
@@ -356,6 +369,7 @@ fn set_replaygain(mode: ReplayGainMode, state: State<'_, AppState>) -> Result<()
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_replaygain(mode);
+    state.persist.touch();
     Ok(())
 }
 
@@ -364,6 +378,7 @@ fn set_repeat(repeat: RepeatMode, state: State<'_, AppState>) -> Result<(), Stri
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_repeat(repeat);
+    state.persist.touch();
     Ok(())
 }
 
@@ -373,6 +388,7 @@ fn set_shuffle(shuffle: bool, state: State<'_, AppState>) -> Result<(), String> 
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .set_shuffle(shuffle);
+    state.persist.touch();
     Ok(())
 }
 
@@ -382,6 +398,7 @@ fn reshuffle_tracks(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .reshuffle();
+    state.persist.touch();
     Ok(())
 }
 
@@ -390,6 +407,7 @@ fn stop_playback(state: State<'_, AppState>) -> Result<(), String> {
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .stop();
+    state.persist.touch();
     Ok(())
 }
 
@@ -582,6 +600,7 @@ fn reorder_queue(from: usize, to: usize, state: State<'_, AppState>) -> Result<(
     player(&state)
         .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
         .reorder_queue(from, to);
+    state.persist.touch();
     Ok(())
 }
 
@@ -657,12 +676,30 @@ pub fn run() {
                 }
             };
 
+            let player_cell = Arc::new(Mutex::new(player));
+
+            // Restore what the last run left behind: player preferences first,
+            // then the queue + position so playback resumes where it stopped.
+            if let Some(p) = player_cell.lock().unwrap().clone() {
+                if let Ok(lib) = Library::open(&db_path.to_string_lossy()) {
+                    if let Ok(Some(settings)) = lib.load_player_settings() {
+                        persist::apply_settings(&p, &settings);
+                    }
+                    if let Ok(Some(session)) = lib.load_session() {
+                        persist::restore_session(&p, &lib, &session);
+                    }
+                }
+            }
+
+            let persist = persist::Persist::spawn(db_path.clone(), Arc::clone(&player_cell));
+
             app.manage(AppState {
                 db_path,
                 scanning: Arc::new(AtomicBool::new(false)),
-                player: Arc::new(Mutex::new(player)),
+                player: player_cell,
                 online_cover,
                 cover_memo,
+                persist,
             });
 
             // Auto-open the mini player while the main window is minimized,
@@ -735,6 +772,9 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
+                // Flush the latest position/settings before libmpv goes away,
+                // so a clean close never loses where playback was.
+                persist::write_now(&state.db_path, &state.player);
                 if let Some(p) = state.player.lock().unwrap().take() {
                     p.shutdown();
                 }

@@ -103,6 +103,8 @@ pub enum LibraryError {
     Invalid(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
     #[error("unsupported schema version {0} (this build supports v3)")]
     UnsupportedSchema(i32),
 }

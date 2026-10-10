@@ -47,7 +47,7 @@ stops misleading (search results, column alignment, labels, contrast).
 
 ## Checklist
 
-- [ ] **01** Persist player settings & restore last session
+- [x] **01** Persist player settings & restore last session
       <!-- docs/issues/01-persistence-settings.md -->
 - [x] **02** Scope `clean_missing` prune to scanned root; never prune on IO
       errors <!-- docs/issues/02-scan-clean-missing-scope.md -->

@@ -181,6 +181,7 @@ enum Cmd {
     SeekRelative(f64),
     SetVolume(i64),
     ToggleMute,
+    SetMute(bool),
     SetSpeed(f64),
     SetEq { preamp: f64, gains: Vec<f64> },
     SetReplayGain(ReplayGainMode),
@@ -388,6 +389,11 @@ impl Player {
 
     pub fn toggle_mute(&self) {
         self.push(Cmd::ToggleMute);
+    }
+
+    /// Set the mute state explicitly (used when restoring persisted settings).
+    pub fn set_mute(&self, mute: bool) {
+        self.push(Cmd::SetMute(mute));
     }
 
     /// Playback-rate multiplier; values outside 0.25–4.0 are clamped
@@ -621,6 +627,11 @@ impl Player {
                 let api = self.api();
                 let muted = api.get_flag("mute").unwrap_or(false);
                 let _ = api.command(&["set", "mute", if muted { "no" } else { "yes" }]);
+                self.emit();
+            }
+            Cmd::SetMute(mute) => {
+                let api = self.api();
+                let _ = api.command(&["set", "mute", if mute { "yes" } else { "no" }]);
                 self.emit();
             }
             Cmd::SetSpeed(speed) => {

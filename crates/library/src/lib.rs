@@ -5,5 +5,6 @@
 
 pub mod cover;
 pub mod db;
+pub mod persist;
 pub mod playlists;
 pub mod scan;
