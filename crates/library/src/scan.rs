@@ -92,13 +92,20 @@ pub fn scan(
         }
     }
 
-    // Prune only tracks whose file has genuinely disappeared from disk —
-    // scanning a *second* folder accumulates, it must not wipe other roots.
-    if opts.clean_missing {
+    // Prune only tracks under the scanned root whose file genuinely vanished.
+    // Two guards keep one scan from wiping rows it shouldn't:
+    //   * scope — rows outside `opts.root` belong to other roots, so keep them;
+    //   * IO-safety — only a "not found" result prunes; a permission or
+    //     transient IO error preserves the row.
+    // An unreachable root (unplugged drive, unmounted share) is treated the
+    // same way: nothing is pruned, so an offline root can't empty the library.
+    if opts.clean_missing && root_is_reachable(&opts.root) {
+        let root_key = norm(&opts.root.to_string_lossy());
+        let root_key = root_key.trim_end_matches('/');
         let stale: Vec<String> = existing
             .values()
+            .filter(|(p, _, _)| under_root(&norm(p), root_key) && is_genuinely_gone(p))
             .map(|(p, _, _)| p.clone())
-            .filter(|p| !Path::new(p).exists())
             .collect();
         if !stale.is_empty() {
             report.removed = lib.delete_tracks(&stale)?;
@@ -174,4 +181,63 @@ fn modified_secs(meta: &std::fs::Metadata) -> i64 {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// A root is reachable when it currently resolves to a directory. An unplugged
+/// drive or unmounted share fails this check, and pruning is skipped so an
+/// offline root never empties the library.
+fn root_is_reachable(root: &Path) -> bool {
+    std::fs::metadata(root).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+/// Whether a normalized stored path lives below the (normalized, trailing
+/// slash trimmed) scanned root. An empty root matches everything.
+fn under_root(key: &str, root_key: &str) -> bool {
+    if root_key.is_empty() {
+        return true;
+    }
+    key == root_key || key.starts_with(&format!("{root_key}/"))
+}
+
+/// Classify one `metadata` result: only a genuine "not found" means the file
+/// is gone and safe to prune. Any other error (permission denied, transient
+/// IO) must preserve the row.
+fn io_says_gone(result: std::io::Result<std::fs::Metadata>) -> bool {
+    matches!(result, Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn is_genuinely_gone(path: &str) -> bool {
+    io_says_gone(std::fs::metadata(path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{io_says_gone, under_root};
+    use std::io::ErrorKind;
+
+    #[test]
+    fn under_root_matches_only_descendants() {
+        assert!(under_root("c:/music/a.flac", "c:/music"));
+        assert!(under_root("c:/music/sub/a.flac", "c:/music"));
+        assert!(under_root("c:/music", "c:/music"), "the root itself counts");
+        assert!(
+            !under_root("c:/musicbox/a.flac", "c:/music"),
+            "a sibling with a shared prefix is not under the root"
+        );
+        assert!(!under_root("d:/other/a.flac", "c:/music"));
+        assert!(under_root("anything", ""), "an empty root matches all");
+    }
+
+    #[test]
+    fn only_not_found_is_treated_as_gone() {
+        assert!(io_says_gone(Err(ErrorKind::NotFound.into())));
+        assert!(
+            !io_says_gone(Err(ErrorKind::PermissionDenied.into())),
+            "denied access preserves the row"
+        );
+        assert!(
+            !io_says_gone(Err(ErrorKind::TimedOut.into())),
+            "transient IO errors preserve the row"
+        );
+    }
 }

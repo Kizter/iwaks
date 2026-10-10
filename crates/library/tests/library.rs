@@ -204,11 +204,37 @@ fn scan_of_another_root_accumulates_and_only_prunes_deleted_files() {
     assert_eq!(second.removed, 0, "other root's files still exist on disk");
     assert_eq!(lib.track_count().unwrap(), 5);
 
-    // But a file that actually disappeared from disk is pruned.
+    // A file that disappeared is pruned only when its *own* root is scanned:
+    // scanning root B must leave root A's rows alone.
     std::fs::remove_file(root_a.join("x1.wav")).expect("remove x1");
     let third = scan_once(&mut lib, &root_b, true);
-    assert_eq!(third.removed, 1);
+    assert_eq!(third.removed, 0, "out-of-scope rows are preserved");
+    assert_eq!(lib.track_count().unwrap(), 5);
+
+    let fourth = scan_once(&mut lib, &root_a, true);
+    assert_eq!(fourth.removed, 1, "root A prunes its own vanished file");
     assert_eq!(lib.track_count().unwrap(), 4);
+}
+
+#[test]
+fn scan_of_unreachable_root_preserves_rows() {
+    let tmp = TempDir::new("scan-offline");
+    let root = tmp.path("Music");
+    std::fs::create_dir_all(&root).expect("mkdir");
+    make_wav(&root.join("a.wav"), 44_100, 2, 1.0);
+    let mut lib = Library::open(":memory:").expect("open");
+    scan_once(&mut lib, &root, true);
+    assert_eq!(lib.track_count().unwrap(), 1);
+
+    // Simulate an unplugged drive / unmounted share: the root vanishes.
+    std::fs::remove_dir_all(&root).expect("remove root");
+    let report = scan_once(&mut lib, &root, true);
+    assert_eq!(report.removed, 0, "an unreachable root must not prune");
+    assert_eq!(
+        lib.track_count().unwrap(),
+        1,
+        "rows preserved while offline"
+    );
 }
 
 // ---------- add individual files ----------

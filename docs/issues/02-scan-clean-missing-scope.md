@@ -2,7 +2,7 @@
 title: "Scope `clean_missing` prune to the scanned root; never prune on IO errors"
 labels: ["bug", "priority:P1", "area:scan"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -42,11 +42,25 @@ gone" experience is alarming and the DB churn is real.
 
 ## Definition of Done
 
-- [ ] Prune only rows under the scanned root (or genuinely vanished files —
+- [x] Prune only rows under the scanned root (or genuinely vanished files —
       decide explicitly in the issue thread)
-- [ ] IO-errrored paths are preserved (simulate missing drive / deny access)
-- [ ] Multi-root accumulation still works (scan A then B keeps both)
-- [ ] Tests cover all three cases (≥80% area coverage)
+- [x] IO-errrored paths are preserved (simulate missing drive / deny access)
+- [x] Multi-root accumulation still works (scan A then B keeps both)
+- [x] Tests cover all three cases (≥80% area coverage)
+
+## Outcome
+
+Decision: prune a row only when **both** hold — it lives *below `opts.root`*
+(`under_root`) **and** its `metadata()` fails with `NotFound` (`io_says_gone`).
+Any other IO error (permission denied, transient) preserves the row, and an
+unreachable root (`root_is_reachable`) skips pruning entirely so an unplugged
+drive never empties the library.
+
+- `crates/library/src/scan.rs` — scoped + IO-safe prune; unit tests for
+  `under_root` / `io_says_gone`.
+- `crates/library/tests/library.rs` — `scan_of_another_root_*` reworked so a
+  deleted file under root A is pruned by root A's scan, not root B's; new
+  `scan_of_unreachable_root_preserves_rows` covers the offline-drive case.
 
 ## References
 
