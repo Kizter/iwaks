@@ -2,7 +2,7 @@
 title: "Accessibility pass: icon contrast, minimum type sizes, keyboard queue reorder"
 labels: ["enhancement", "priority:P1", "area:a11y"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -46,12 +46,40 @@ impossible without a mouse; keyboard users lose track of focus.
 
 ## Definition of Done
 
-- [ ] Computed contrast ≥4.5:1 for every non-large UI element changed
-- [ ] Minimum font size ≥11px for functional text (except decorative)
-- [ ] Queue rows reorder via keyboard; focus never lost
-- [ ] `prefers-reduced-motion` behavior preserved
-- [ ] Automated contrast checks if tooling available (or documented manual
+- [x] Computed contrast ≥4.5:1 for every non-large UI element changed
+- [x] Minimum font size ≥11px for functional text (except decorative)
+- [x] Queue rows reorder via keyboard; focus never lost
+- [x] `prefers-reduced-motion` behavior preserved
+- [x] Automated contrast checks if tooling available (or documented manual
       pass on all views)
+
+## Outcome
+
+1. **Icon contrast** — `--ink-soft` darkened `#a37a84 → #7f5865`. Measured
+   (WCAG formula, computed script) on every surface it is used against:
+   `--bg` 5.18:1, `--sidebar` 4.81:1, `--mint` 4.95:1, `--surface` 5.55:1 —
+   all ≥4.5:1 (was 3.18:1 on bg, 2.96 on `--sidebar`).
+2. **Minimum type size** — every functional font-size below 11 px raised to
+   `0.72rem` (11.52 px): `.track-badge` (0.6), `.eq-val` (0.64),
+   `.eq-freq`/`.mp-panel-count` (0.68), and the 0.7rem labels
+   (`.sidebar-label`, `.mp-source-name`, `.queue-now`, `.set-group-title`).
+   Smallest remaining functional size is 0.72rem.
+3. **Keyboard queue reorder** — a focused queue row moves with
+   `Alt+ArrowUp` / `Alt+ArrowDown`; the move is announced via a visually
+   hidden `role="status"` live region and focus follows the moved track
+   (row keys keep the DOM node, plus a post-reorder `scrollIntoView`/focus
+   guard). Rows expose `tabIndex`, `aria-label`, and `aria-keyshortcuts`.
+4. **Focus visibility** — the global `:focus-visible` rule no longer forces
+   `border-radius: 6px` on focused elements (it previously mutated the
+   element's radius). Inputs keep a solid `2px + 4px` ring instead of the
+   old 15%-alpha ring (~1.2:1 effective). Virtualized rows and grid cards
+   get an inset `-2px` outline so scroll edges can't clip it.
+5. **Reduced motion** — unchanged; the new focus/keyboard work adds no
+   animation (post-reorder scroll is `block: "nearest"`, instant).
+
+No contrast lint tooling exists in the repo (no stylelint/axe config), so
+values were computed with a one-off WCAG script and `npm run build` /
+`npx tsc --noEmit` gate the change.
 
 ## References
 

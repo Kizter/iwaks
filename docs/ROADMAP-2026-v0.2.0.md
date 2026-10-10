@@ -63,7 +63,7 @@ stops misleading (search results, column alignment, labels, contrast).
       <!-- docs/issues/07-volume-slider-commit.md -->
 - [x] **08** `.m4a` badge corrected; friendly error copy
       <!-- docs/issues/08-m4a-badge-and-error-copy.md -->
-- [ ] **09** Accessibility pass (contrast, min type, keyboard reorder)
+- [x] **09** Accessibility pass (contrast, min type, keyboard reorder)
       <!-- docs/issues/09-accessibility-pass.md -->
 - [ ] **10** Album-art-dominant Now Playing view
       <!-- docs/issues/10-now-playing-view.md -->

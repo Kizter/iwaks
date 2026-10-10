@@ -6,7 +6,7 @@
   --sidebar: #ece5d9; /* deeper warm panel */
   --ink: #8f5a66; /* dusty rosewood — aksen utama (putih 5.48:1, di bg 4.71:1) */
   --ink-hover: #7a4955; /* hover tombol (7.12:1) */
-  --ink-soft: #a37a84; /* ikon sekunder (3.18:1) */
+  --ink-soft: #7f5865; /* ikon sekunder (bg 5.18:1, panel 4.81:1, mint 4.95:1) */
   --ink-strong: #6e3f4b; /* teks/ikon pill aktif */
   --mint: #f1e7e0; /* hover lembut / cover fallback */
   --ice: #e6d9d3; /* pill aktif / is-playing / field */
@@ -65,7 +65,17 @@ body {
 :focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 2px;
-  border-radius: 6px;
+  /* No `border-radius` here: the outline already follows the element's own
+     radius, and setting it would visibly change the element on focus. */
+}
+
+/* Focus inside the virtualized lists / cards: pull the outline inside so the
+   scroll edge and neighbouring rows cannot clip it. */
+.track-row:focus-visible,
+.queue-row:focus-visible,
+.group-card:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
 }
 
 .visually-hidden {
@@ -128,7 +138,7 @@ body {
 .sidebar-label {
   margin: 18px 0 0;
   padding: 0 6px;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -300,7 +310,7 @@ body {
 .search input:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px var(--ink-a15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 .btn-primary {
@@ -605,7 +615,7 @@ body {
 
 .track-badge {
   flex: none;
-  font-size: 0.6rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.05em;
   color: var(--text-dim);
@@ -983,14 +993,14 @@ body {
 }
 
 .eq-val {
-  font-size: 0.64rem;
+  font-size: 0.72rem;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .eq-freq {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--text-dim);
   white-space: nowrap;
 }
@@ -1294,7 +1304,7 @@ input[type="range"].eq-slider::-moz-range-thumb {
   cursor: default;
 }
 .mp-source-name {
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -1405,7 +1415,7 @@ input[type="range"].eq-slider::-moz-range-thumb {
 }
 .mp-panel-count {
   flex: 0 0 auto;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   color: var(--text-dim);
 }
 .mp-panel-empty {
@@ -1560,7 +1570,7 @@ input[type="range"]:disabled {
 .inline-name input:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px var(--ink-a15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 .btn-danger {
@@ -1666,7 +1676,7 @@ input[type="range"]:disabled {
 .picker-new input:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px var(--ink-a15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 @media (max-width: 760px) {
@@ -1729,7 +1739,7 @@ input[type="range"]:disabled {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
@@ -1889,7 +1899,7 @@ input[type="range"]:disabled {
 .tag-field input:focus-visible {
   outline: none;
   border-color: var(--ink);
-  box-shadow: 0 0 0 3px var(--ink-a15);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 .tag-editor-error {
   margin: 12px 0 0;
@@ -1987,7 +1997,7 @@ input[type="range"]:disabled {
   align-items: center;
   gap: 8px;
   margin: 0 0 4px;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;

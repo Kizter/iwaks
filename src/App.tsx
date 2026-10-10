@@ -450,6 +450,8 @@ function QueueList({
   const dragFrom = useRef<number | null>(null);
   const [dragSrc, setDragSrc] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const pendingFocus = useRef<number | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -470,6 +472,28 @@ function QueueList({
     setDragOver(null);
   }, []);
 
+  // Keyboard reorder: once the order changes, keep focus on the moved track.
+  useEffect(() => {
+    const idx = pendingFocus.current;
+    if (idx === null) return;
+    pendingFocus.current = null;
+    const el = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-queue-index="${idx}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+    el?.focus();
+  }, [tracks]);
+
+  const moveRow = useCallback(
+    (from: number, to: number) => {
+      if (to < 0 || to >= tracks.length || to === from) return;
+      pendingFocus.current = to;
+      onReorder(from, to);
+      setAnnounce(`${tracks[from].title} moved to position ${to + 1}`);
+    },
+    [tracks, onReorder],
+  );
+
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 8);
   const end = Math.min(tracks.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + 8);
   const rows: ReactNode[] = [];
@@ -482,6 +506,20 @@ function QueueList({
         className={`track-row queue-row${isPlaying ? " is-playing" : ""}${dragSrc === i ? " queue-source" : ""}${dragOver === i ? " drag-over" : ""}`}
         style={{ transform: `translateY(${i * ROW_HEIGHT}px)` }}
         title={t.path}
+        tabIndex={0}
+        data-queue-index={i}
+        aria-label={`${t.title}${t.artist ? ` — ${t.artist}` : ""}, position ${i + 1} of ${tracks.length}${isPlaying ? ", now playing" : ""}. Alt+Up or Alt+Down to reorder.`}
+        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+        onKeyDown={(e) => {
+          if (!e.altKey) return;
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            moveRow(i, i - 1);
+          } else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            moveRow(i, i + 1);
+          }
+        }}
         draggable
         onDragStart={(e) => {
           dragFrom.current = i;
@@ -543,6 +581,9 @@ function QueueList({
       <ul className="track-inner" style={{ height: tracks.length * ROW_HEIGHT }}>
         {rows}
       </ul>
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {announce}
+      </span>
     </div>
   );
 }
