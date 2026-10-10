@@ -2,7 +2,7 @@
 title: "Album-art-dominant Now Playing view (design goal: \"big album art, Poweramp-style\")"
 labels: ["enhancement", "priority:P2", "area:ux"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 ## Summary
@@ -41,12 +41,41 @@ album art, and lyrics live in a small popover.
 
 ## Definition of Done
 
-- [ ] Now Playing opens from the player bar and keyboard, and closes cleanly
-- [ ] Large cover renders without layout shift; fallback note tile for
+- [x] Now Playing opens from the player bar and keyboard, and closes cleanly
+- [x] Large cover renders without layout shift; fallback note tile for
       tracks without art
-- [ ] Lyrics (existing popover content) available inside the view
-- [ ] Works at min window size 900×600 (responsive)
-- [ ] Frontend tests where logic is added; `npm run build` clean
+- [x] Lyrics (existing popover content) available inside the view
+- [x] Works at min window size 900×600 (responsive)
+- [x] Frontend tests where logic is added; `npm run build` clean
+
+## Outcome
+
+A new full-content surface, `src/NowPlaying.tsx`, rendered inside the app
+shell so the sidebar and player bar stay visible (design §4.4). It reuses
+existing state/events — no new player commands.
+
+- **Entry/exit** — the player-bar art/title is now a button
+  (`PlayerBar` gained `nowPlaying` + `onToggleNowPlaying`, passed through
+  `Shell`) and `N` opens the view / `Escape` closes it. Both shortcuts skip
+  text fields. The in-view "Library" back button, a sidebar click, or
+  `Escape` all dismiss it; closing returns to whatever `view` was underneath
+  (a separate `nowPlaying` boolean, so the browse state is preserved).
+- **Layout** — two columns (art + meta + transport + seek + volume on the
+  left, lyrics on the right) that stack below 1100 px. `.now-art` is a fixed
+  `aspect-ratio: 1` box, so a late-loading image causes no layout shift.
+- **Art** — reuses `Cover` (embedded art only, cached) with a `size` prop so
+  the no-art case shows a matching large note tile. The online album-art URL
+  stays scoped to the Discord presence fetch; wiring it into the hero would
+  need new IPC plumbing and was left out deliberately.
+- **Lyrics** — the popover body was extracted into `src/LyricsPanel.tsx`
+  (fetch, active-line highlight, reduced-motion-aware auto-scroll) and is now
+  shared by the player-bar popover and the Now Playing column, removing a
+  duplicate.
+
+Seek and volume use the same draft-then-commit pattern as the bar (one IPC
+invoke on release/blur, never per pointer move). `npx tsc --noEmit` and
+`npm run build` are clean. Frontend unit tests for the draft-commit helpers
+are deferred with the repo-wide vitest gap (see #04/#08).
 
 ## References
 

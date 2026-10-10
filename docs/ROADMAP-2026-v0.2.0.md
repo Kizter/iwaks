@@ -65,7 +65,7 @@ stops misleading (search results, column alignment, labels, contrast).
       <!-- docs/issues/08-m4a-badge-and-error-copy.md -->
 - [x] **09** Accessibility pass (contrast, min type, keyboard reorder)
       <!-- docs/issues/09-accessibility-pass.md -->
-- [ ] **10** Album-art-dominant Now Playing view
+- [x] **10** Album-art-dominant Now Playing view
       <!-- docs/issues/10-now-playing-view.md -->
 - [x] **11** Visual consistency (font scale, radii tokens, one icon system)
       <!-- docs/issues/11-visual-consistency-polish.md -->

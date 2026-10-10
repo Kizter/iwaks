@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Cover } from "./Cover";
+import { LyricsPanel } from "./LyricsPanel";
 import { formatDuration } from "./format";
 import {
-  getLyrics,
   playerNext,
   playerPrev,
   playerReshuffle,
@@ -18,7 +18,7 @@ import {
   playerTogglePlay,
   toggleMiniPlayer,
 } from "./api";
-import type { Lyrics, PlayerState, ReplayGainMode, RepeatMode } from "./types";
+import type { PlayerState, ReplayGainMode, RepeatMode } from "./types";
 import {
   DiceFour,
   Moon,
@@ -66,14 +66,21 @@ function fmtDb(v: number): string {
 }
 
 /** Always-visible bottom bar: now-playing, transport, seek, repeat, volume. */
-export default function PlayerBar({ state }: { state: PlayerState | null }) {
+export default function PlayerBar({
+  state,
+  nowPlaying,
+  onToggleNowPlaying,
+}: {
+  state: PlayerState | null;
+  nowPlaying?: boolean;
+  onToggleNowPlaying?: () => void;
+}) {
   const [drag, setDrag] = useState<number | null>(null);
   const [volDraft, setVolDraft] = useState<number | null>(null);
   const [sleepChoice, setSleepChoice] = useState("off");
   const [eqOpen, setEqOpen] = useState(false);
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
   const [lyricsOpen, setLyricsOpen] = useState(false);
-  const [lyrics, setLyrics] = useState<Lyrics | null | undefined>(undefined);
   const [sleepOpen, setSleepOpen] = useState(false);
   const cur = state?.current ?? null;
   const hasTrack = cur !== null;
@@ -100,50 +107,6 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
       setSleepChoice("off");
     }
   }, [sleepRemaining, sleepChoice]);
-
-  // ---- lyrics: fetch for the current track while the panel is open ----
-  const lyricPath = cur?.path ?? null;
-  useEffect(() => {
-    if (!lyricsOpen || !lyricPath) {
-      setLyrics(undefined);
-      return;
-    }
-    let cancelled = false;
-    setLyrics(undefined); // loading
-    void getLyrics(lyricPath).then((l) => {
-      if (!cancelled) setLyrics(l);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [lyricsOpen, lyricPath]);
-
-  // Active line = the last one whose timestamp is <= playback position.
-  const activeIdx = useMemo(() => {
-    const timed = lyrics?.timed ?? [];
-    if (timed.length === 0) return -1;
-    const t = state?.position ?? 0;
-    let idx = -1;
-    for (let i = 0; i < timed.length; i++) {
-      if (timed[i].time <= t) idx = i;
-      else break;
-    }
-    return idx;
-  }, [lyrics, state?.position]);
-
-  const lyricBox = useRef<HTMLDivElement | null>(null);
-  const activeLine = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const box = lyricBox.current;
-    const el = activeLine.current;
-    if (box && el) {
-      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      box.scrollTo({
-        top: Math.max(0, el.offsetTop - box.clientHeight / 2),
-        behavior: reduce ? "auto" : "smooth",
-      });
-    }
-  }, [activeIdx]);
 
   const commitSeek = () => {
     if (drag !== null) {
@@ -203,15 +166,34 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
     <footer className="player-bar" aria-label="Player">
       <div className="pb-left">
         {cur ? (
-          <>
-            <span className="pb-art">
-              <Cover track={cur} />
-            </span>
-            <span className="pb-meta">
-              <span className="pb-title">{cur.title}</span>
-              <span className="pb-sub">{cur.artist ?? "Unknown artist"}</span>
-            </span>
-          </>
+          onToggleNowPlaying ? (
+            <button
+              type="button"
+              className="pb-open"
+              onClick={onToggleNowPlaying}
+              aria-label={nowPlaying ? "Close Now Playing" : "Open Now Playing"}
+              aria-pressed={nowPlaying}
+              title={nowPlaying ? "Close Now Playing" : "Open Now Playing"}
+            >
+              <span className="pb-art">
+                <Cover track={cur} />
+              </span>
+              <span className="pb-meta">
+                <span className="pb-title">{cur.title}</span>
+                <span className="pb-sub">{cur.artist ?? "Unknown artist"}</span>
+              </span>
+            </button>
+          ) : (
+            <>
+              <span className="pb-art">
+                <Cover track={cur} />
+              </span>
+              <span className="pb-meta">
+                <span className="pb-title">{cur.title}</span>
+                <span className="pb-sub">{cur.artist ?? "Unknown artist"}</span>
+              </span>
+            </>
+          )
         ) : (
           <span className="pb-empty">{state ? "Nothing playing" : "Playback unavailable"}</span>
         )}
@@ -445,25 +427,7 @@ export default function PlayerBar({ state }: { state: PlayerState | null }) {
           </button>
           {lyricsOpen && state && (
             <div className="lyr-pop" role="group" aria-label="Lyrics panel">
-              {lyrics === undefined ? (
-                <p className="lyr-empty">Loading…</p>
-              ) : lyrics === null || (lyrics.timed.length === 0 && !lyrics.plain) ? (
-                <p className="lyr-empty">No lyrics for this track</p>
-              ) : lyrics.timed.length > 0 ? (
-                <div className="lyr-list" ref={lyricBox}>
-                  {lyrics.timed.map((line, i) => (
-                    <div
-                      key={i}
-                      ref={i === activeIdx ? activeLine : undefined}
-                      className={`lyr-line${i === activeIdx ? " on" : ""}`}
-                    >
-                      {line.text}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <pre className="lyr-plain">{lyrics.plain}</pre>
-              )}
+              <LyricsPanel path={cur?.path ?? null} position={position} />
             </div>
           )}
         </div>

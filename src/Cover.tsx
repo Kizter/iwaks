@@ -7,12 +7,12 @@ import type { Track } from "./types";
 const coverCache = new Map<string, string | null>();
 
 /** Music-note fallback shown when a track has no embedded cover art. */
-export function NoteIcon() {
-  return <MusicNote className="cover-note" size={18} aria-hidden="true" />;
+export function NoteIcon({ size = 18 }: { size?: number }) {
+  return <MusicNote className="cover-note" size={size} aria-hidden="true" />;
 }
 
 /** Track thumbnail: embedded art when present, else a colored note tile. */
-export function Cover({ track }: { track: Track }) {
+export function Cover({ track, size }: { track: Track; size?: number }) {
   const [src, setSrc] = useState<string | null | undefined>(undefined); // undefined = loading
   const fmt = track.format.toLowerCase();
 
@@ -38,7 +38,11 @@ export function Cover({ track }: { track: Track }) {
 
   return (
     <span className={`cover cover-${fmt}`} aria-hidden="true">
-      {src ? <img className="cover-art" src={src} alt="" loading="lazy" /> : <NoteIcon />}
+      {src ? (
+        <img className="cover-art" src={src} alt="" loading="lazy" />
+      ) : (
+        <NoteIcon size={size} />
+      )}
     </span>
   );
 }

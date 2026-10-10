@@ -30,6 +30,7 @@ import {
 import "./App.css";
 import { formatBadge, formatDuration, friendlyError, scanSummary } from "./format";
 import { Cover } from "./Cover";
+import { NowPlaying } from "./NowPlaying";
 import PlayerBar from "./PlayerBar";
 import Settings from "./Settings";
 import {
@@ -917,11 +918,15 @@ function Shell({
   playerState,
   view,
   onNavigate,
+  nowPlaying,
+  onToggleNowPlaying,
 }: {
   children: ReactNode;
   playerState: PlayerState | null;
   view: View;
   onNavigate: (v: View) => void;
+  nowPlaying?: boolean;
+  onToggleNowPlaying?: () => void;
 }) {
   const home = homeOf(view);
   return (
@@ -978,7 +983,11 @@ function Shell({
         </nav>
       </aside>
       <section className="main" aria-label="Library content">{children}</section>
-      <PlayerBar state={playerState} />
+      <PlayerBar
+        state={playerState}
+        nowPlaying={nowPlaying}
+        onToggleNowPlaying={onToggleNowPlaying}
+      />
     </main>
   );
 }
@@ -998,6 +1007,9 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   // Active library view: song list, browse grid, or a specific group detail.
   const [view, setView] = useState<View>({ kind: "songs" });
+  // The album-art-first Now Playing surface (issue #10). Kept separate from
+  // `view` so closing it returns to whatever the library was showing.
+  const [nowPlaying, setNowPlaying] = useState(false);
   const tracks = useSearch(query, refreshKey);
 
   // ---- session queue (M4 slice 2) ----
@@ -1112,6 +1124,27 @@ function App() {
       if (e.code === "Space") {
         e.preventDefault();
         void playerTogglePlay();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Now Playing shortcuts: `N` opens the view, `Escape` closes it. Skipped
+  // while typing so a stray key never hijacks a text field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      if (e.key === "Escape") {
+        setNowPlaying(false);
+        return;
+      }
+      if ((e.key === "n" || e.key === "N") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setNowPlaying(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1473,13 +1506,39 @@ function App() {
     [activeTracks],
   );
 
+  // Sidebar navigation also dismisses Now Playing.
+  const goTo = useCallback((v: View) => {
+    setNowPlaying(false);
+    setView(v);
+  }, []);
+
   const detailTitle =
     groupKind === "folder" && groupKey ? nameOfDir(groupKey) : (groupKey ?? "");
+  // Now Playing is a full content surface of its own (issue #10): big art and
+  // lyrics, no search box. The sidebar and player bar stay put around it.
+  if (nowPlaying) {
+    return (
+      <Shell
+        playerState={playerState}
+        view={view}
+        onNavigate={goTo}
+        nowPlaying
+        onToggleNowPlaying={() => setNowPlaying(false)}
+      >
+        <NowPlaying state={playerState} onClose={() => setNowPlaying(false)} />
+      </Shell>
+    );
+  }
   // Settings is its own surface: no search box, no add-folder buttons, no list.
   // Rendered before the library shell's body so the toolbar stays minimal.
   if (view.kind === "settings") {
     return (
-      <Shell playerState={playerState} view={view} onNavigate={setView}>
+      <Shell
+        playerState={playerState}
+        view={view}
+        onNavigate={goTo}
+        onToggleNowPlaying={() => setNowPlaying(true)}
+      >
         <Settings />
       </Shell>
     );
@@ -1513,7 +1572,12 @@ function App() {
             : showing.length;
 
   return (
-    <Shell playerState={playerState} view={view} onNavigate={setView}>
+    <Shell
+      playerState={playerState}
+      view={view}
+      onNavigate={goTo}
+      onToggleNowPlaying={() => setNowPlaying(true)}
+    >
       <div className="toolbar">
         <div className="toolbar-title">
           {(groupKind || isPlaylistDetail) && (
