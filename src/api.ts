@@ -196,6 +196,16 @@ export function reorderQueue(from: number, to: number): Promise<void> {
   return invoke<void>("reorder_queue", { from, to });
 }
 
+/** Drop the queue track at play-order `position`. */
+export function removeFromQueue(position: number): Promise<void> {
+  return invoke<void>("remove_from_queue", { position });
+}
+
+/** Empty the session queue and stop playback (repeat/shuffle are kept). */
+export function clearQueue(): Promise<void> {
+  return invoke<void>("clear_queue");
+}
+
 /** Save the current queue as a playlist; resolves to its id. */
 export function saveQueueAsPlaylist(name: string): Promise<number> {
   return invoke<number>("save_queue_as_playlist", { name });

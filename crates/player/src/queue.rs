@@ -201,6 +201,63 @@ impl Queue {
             ..self.clone()
         }
     }
+
+    // ---- manual remove (session queue, issue #19) ----
+
+    /// Track index the queue position `pos` points at.
+    pub fn track_at(&self, pos: usize) -> Option<usize> {
+        self.order.get(pos).copied()
+    }
+
+    /// Empty queue that keeps the repeat and shuffle preferences: clearing the
+    /// session list must not silently change how the next list plays.
+    pub fn cleared(&self) -> Self {
+        Self {
+            len: 0,
+            index: None,
+            repeat: self.repeat,
+            shuffle: self.shuffle,
+            order: Vec::new(),
+        }
+    }
+
+    /// Drop the track at queue position `pos`, keeping the relative order of
+    /// the rest. The playing track follows its new slot: removing something
+    /// before it shifts it back one, removing the playing one leaves the track
+    /// that took its slot in place (the caller loads it), and removing the last
+    /// track while it plays leaves nothing current. An out-of-range `pos`
+    /// returns the queue unchanged.
+    pub fn without_position(&self, pos: usize) -> Self {
+        if self.len == 0 || pos >= self.len {
+            return self.clone();
+        }
+        let mut order = self.order.clone();
+        let removed = order.remove(pos);
+        // Tracks stored above the removed one shift down in `tracks`.
+        for t in order.iter_mut() {
+            if *t > removed {
+                *t -= 1;
+            }
+        }
+        let index = match self.index {
+            None => None,
+            Some(cur) if cur == pos => {
+                if pos + 1 < self.len {
+                    Some(pos)
+                } else {
+                    None
+                }
+            }
+            Some(cur) if cur > pos => Some(cur - 1),
+            Some(cur) => Some(cur),
+        };
+        Self {
+            order,
+            index,
+            len: self.len - 1,
+            ..self.clone()
+        }
+    }
 }
 
 /// Deterministic Fisher–Yates shuffle of `0..n` from a SplitMix64 generator.

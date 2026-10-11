@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEventHandler,
+  type ReactNode,
+} from "react";
 import {
   addFiles,
   addToPlaylist,
+  clearQueue,
   createPlaylist,
   deletePlaylist,
   exportM3u,
@@ -24,7 +33,9 @@ import {
   playerTogglePlay,
   removeFromPlaylist,
   renamePlaylist,
+  reorderPlaylist,
   reorderQueue,
+  removeFromQueue,
   saveQueueAsPlaylist,
   scanFolder,
   searchTracks,
@@ -246,6 +257,17 @@ function EditIcon() {
   return <PencilSimple size={12} aria-hidden="true" />;
 }
 
+/** Per-index HTML5 drag handlers, present only when the list is reorderable. */
+interface RowDrag {
+  start: DragEventHandler;
+  over: DragEventHandler;
+  leave: DragEventHandler;
+  drop: DragEventHandler;
+  end: DragEventHandler;
+  source: boolean;
+  overTarget: boolean;
+}
+
 function TrackRow({
   track,
   top,
@@ -254,6 +276,8 @@ function TrackRow({
   onAdd,
   onRemove,
   onEdit,
+  reorder,
+  drag,
 }: {
   track: Track;
   top: number;
@@ -262,16 +286,38 @@ function TrackRow({
   onAdd?: (t: Track) => void;
   onRemove?: (t: Track) => void;
   onEdit?: (t: Track) => void;
+  /** Row index and list length, set only when the list can be reordered. */
+  reorder?: { index: number; total: number; move: (from: number, to: number) => void };
+  drag?: RowDrag;
 }) {
   const artist = track.artist ?? "Unknown artist";
   const album = track.album ?? "";
+  // A finished drag ends with a click event in most browsers; swallow that one
+  // so dropping a row never also starts playback.
+  const dragged = useRef(false);
   return (
     <li
-      className={`track-row${isPlaying ? " is-playing" : ""}`}
+      className={`track-row${isPlaying ? " is-playing" : ""}${drag?.source ? " queue-source" : ""}${drag?.overTarget ? " drag-over" : ""}`}
       style={{ transform: `translateY(${top}px)` }}
       title={track.path}
-      onClick={onPlay}
+      onMouseDown={() => {
+        // A new press always starts clean, so a cancelled drag cannot swallow
+        // the click that follows it.
+        dragged.current = false;
+      }}
+      onClick={() => {
+        if (dragged.current) {
+          dragged.current = false;
+          return;
+        }
+        onPlay();
+      }}
       onKeyDown={(e) => {
+        if (reorder && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+          e.preventDefault();
+          reorder.move(reorder.index, reorder.index + (e.key === "ArrowUp" ? -1 : 1));
+          return;
+        }
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onPlay();
@@ -279,6 +325,26 @@ function TrackRow({
       }}
       tabIndex={0}
       role="button"
+      draggable={drag ? true : undefined}
+      onDragStart={
+        drag
+          ? (e) => {
+              dragged.current = true;
+              drag.start(e);
+            }
+          : undefined
+      }
+      onDragOver={drag?.over}
+      onDragLeave={drag?.leave}
+      onDrop={drag?.drop}
+      onDragEnd={drag?.end}
+      data-track-index={reorder ? reorder.index : undefined}
+      aria-label={
+        reorder
+          ? `${track.title}${artist ? ` — ${artist}` : ""}, position ${reorder.index + 1} of ${reorder.total}${isPlaying ? ", now playing" : ""}. Alt+Up or Alt+Down to reorder.`
+          : undefined
+      }
+      aria-keyshortcuts={reorder ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
     >
       <Cover track={track} />
       <span className="track-main">
@@ -343,7 +409,12 @@ function BackIcon() {
   return <CaretLeft size={15} aria-hidden="true" />;
 }
 
-/** Fixed-row-height virtualized list (hand-rolled — no dependency, React-19-safe). */
+/** Fixed-row-height virtualized list (hand-rolled — no dependency, React-19-safe).
+ *
+ * When `onReorder` is given, rows become draggable and `Alt`+`↑`/`↓` moves
+ * them — the same affordance as the session queue, so the playlist editor
+ * finally has a way to set its own play order (issue #18).
+ */
 function TrackList({
   tracks,
   playingPath,
@@ -351,6 +422,7 @@ function TrackList({
   onAdd,
   onRemove,
   onEdit,
+  onReorder,
 }: {
   tracks: Track[];
   playingPath: string | null;
@@ -358,10 +430,16 @@ function TrackList({
   onAdd?: (t: Track) => void;
   onRemove?: (t: Track) => void;
   onEdit?: (t: Track) => void;
+  onReorder?: (from: number, to: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH] = useState(0);
+  const dragFrom = useRef<number | null>(null);
+  const [dragSrc, setDragSrc] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  const [announce, setAnnounce] = useState("");
+  const pendingFocus = useRef<number | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -375,6 +453,32 @@ function TrackList({
   const onScroll = useCallback(() => {
     setScrollTop(scrollRef.current?.scrollTop ?? 0);
   }, []);
+
+  const clearDrag = useCallback(() => {
+    dragFrom.current = null;
+    setDragSrc(null);
+    setDragOver(null);
+  }, []);
+
+  // Keyboard reorder: keep focus on the row that moved.
+  useEffect(() => {
+    const idx = pendingFocus.current;
+    if (idx === null) return;
+    pendingFocus.current = null;
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-track-index="${idx}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+    el?.focus();
+  }, [tracks]);
+
+  const moveRow = useCallback(
+    (from: number, to: number) => {
+      if (!onReorder || to < 0 || to >= tracks.length || to === from) return;
+      pendingFocus.current = to;
+      onReorder(from, to);
+      setAnnounce(`${tracks[from].title} moved to position ${to + 1} of ${tracks.length}`);
+    },
+    [tracks, onReorder],
+  );
 
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 8);
   const end = Math.min(tracks.length, Math.ceil((scrollTop + viewH) / ROW_HEIGHT) + 8);
@@ -391,15 +495,54 @@ function TrackList({
         onAdd={onAdd}
         onRemove={onRemove}
         onEdit={onEdit}
+        reorder={onReorder ? { index: i, total: tracks.length, move: moveRow } : undefined}
+        drag={
+          onReorder
+            ? {
+                source: dragSrc === i,
+                overTarget: dragOver === i,
+                start: (e) => {
+                  dragFrom.current = i;
+                  setDragSrc(i);
+                  e.dataTransfer.effectAllowed = "move";
+                },
+                over: (e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOver(i);
+                },
+                leave: () => setDragOver((cur) => (cur === i ? null : cur)),
+                drop: (e) => {
+                  e.preventDefault();
+                  const from = dragFrom.current;
+                  if (from !== null && from !== i) onReorder(from, i);
+                  clearDrag();
+                },
+                end: clearDrag,
+              }
+            : undefined
+        }
       />,
     );
   }
 
   return (
-    <div className="track-scroll" ref={scrollRef} onScroll={onScroll}>
+    <div
+      className="track-scroll"
+      ref={scrollRef}
+      onScroll={onScroll}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        clearDrag();
+      }}
+    >
       <ul className="track-inner" style={{ height: tracks.length * ROW_HEIGHT }}>
         {rows}
       </ul>
+      <span className="visually-hidden" role="status" aria-live="polite">
+        {announce}
+      </span>
     </div>
   );
 }
@@ -418,10 +561,12 @@ function QueueList({
   tracks,
   playingPath,
   onReorder,
+  onRemove,
 }: {
   tracks: Track[];
   playingPath: string | null;
   onReorder: (from: number, to: number) => void;
+  onRemove?: (position: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -487,9 +632,14 @@ function QueueList({
         title={t.path}
         tabIndex={0}
         data-queue-index={i}
-        aria-label={`${t.title}${t.artist ? ` — ${t.artist}` : ""}, position ${i + 1} of ${tracks.length}${isPlaying ? ", now playing" : ""}. Alt+Up or Alt+Down to reorder.`}
+        aria-label={`${t.title}${t.artist ? ` — ${t.artist}` : ""}, position ${i + 1} of ${tracks.length}${isPlaying ? ", now playing" : ""}. Alt+Up or Alt+Down to reorder.${onRemove ? " Press Delete to drop it from the queue." : ""}`}
         aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
         onKeyDown={(e) => {
+          if (onRemove && (e.key === "Delete" || e.key === "Backspace")) {
+            e.preventDefault();
+            onRemove(i);
+            return;
+          }
           if (!e.altKey) return;
           if (e.key === "ArrowUp") {
             e.preventDefault();
@@ -538,6 +688,17 @@ function QueueList({
           )}
           <span className="track-badge">{formatBadge(t.format)}</span>
           <span className="track-dur">{formatDuration(t.durationMs)}</span>
+          {onRemove && (
+            <button
+              type="button"
+              className="row-btn"
+              title="Remove from queue"
+              aria-label={`Remove ${t.title} from the queue`}
+              onClick={() => onRemove(i)}
+            >
+              <CloseIcon />
+            </button>
+          )}
           <span className="queue-handle" title="Drag to reorder" aria-hidden="true">
             <GripIcon />
           </span>
@@ -1382,12 +1543,59 @@ function App() {
     [view, refreshPlaylists],
   );
 
+  const onReorderPlaylist = useCallback(
+    async (from: number, to: number) => {
+      if (view.kind !== "playlist" || !plDetail) return;
+      // Same filter the list shows, recomputed here so the handler does not
+      // depend on a value declared further down the render body.
+      const visible = plDetail.tracks.filter((t) => matches(t, query));
+      const moved = visible[from];
+      const target = visible[to];
+      if (!moved || !target) return;
+      // `visible` may be a filtered subset, so the move is expressed on track
+      // ids — "put the dragged track where the hovered one was" — and applied
+      // to the full playlist order.
+      const full = plDetail.tracks;
+      const fromPos = full.findIndex((t) => t.id === moved.id);
+      const toPos = full.findIndex((t) => t.id === target.id);
+      if (fromPos < 0 || toPos < 0 || fromPos === toPos) return;
+      const next = [...full];
+      const [item] = next.splice(fromPos, 1);
+      next.splice(toPos, 0, item);
+      try {
+        await reorderPlaylist(view.id, next.map((t) => t.id));
+        await refreshPlaylists();
+      } catch (e) {
+        setBanner(`Reorder failed — ${friendlyError(e)}`);
+      }
+    },
+    [view, plDetail, query, refreshPlaylists],
+  );
+
   const onReorderQueue = useCallback(async (from: number, to: number) => {
     try {
       await reorderQueue(from, to);
       setQueue(await getQueue());
     } catch (e) {
       setBanner(`Reorder failed — ${friendlyError(e)}`);
+    }
+  }, []);
+
+  const onRemoveFromQueue = useCallback(async (position: number) => {
+    try {
+      await removeFromQueue(position);
+      setQueue(await getQueue());
+    } catch (e) {
+      setBanner(`Couldn't remove track — ${friendlyError(e)}`);
+    }
+  }, []);
+
+  const onClearQueue = useCallback(async () => {
+    try {
+      await clearQueue();
+      setQueue([]);
+    } catch (e) {
+      setBanner(`Couldn't clear the queue — ${friendlyError(e)}`);
     }
   }, []);
 
@@ -1770,6 +1978,9 @@ function App() {
                   Save as playlist
                 </button>
               )}
+              <button className="btn-danger" onClick={() => void onClearQueue()}>
+                Clear queue
+              </button>
             </>
           )}
         </div>
@@ -1873,6 +2084,7 @@ function App() {
             tracks={queue}
             playingPath={playerState?.current?.path ?? null}
             onReorder={(from, to) => void onReorderQueue(from, to)}
+            onRemove={(position) => void onRemoveFromQueue(position)}
           />
         ) : noResults ? (
           <div className="empty no-results">
@@ -1930,6 +2142,7 @@ function App() {
             onPlay={onPlay}
             onEdit={(t) => setEditTarget(t)}
             onRemove={(t) => void onRemoveFromDetail(t)}
+            onReorder={(from, to) => void onReorderPlaylist(from, to)}
           />
         ) : gridKind === "folders" && folderTree ? (
           <div className="group-grid">

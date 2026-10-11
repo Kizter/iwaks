@@ -477,6 +477,49 @@ impl Player {
         self.queue_version.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Remove the queue track at play-order position `position`. Removing
+    /// anything else is pure bookkeeping; removing the playing track hands over
+    /// to the track that took its slot, or stops when nothing follows.
+    pub fn remove_queue_at(&self, position: usize) {
+        // One critical section (queue → tracks, the order used everywhere else)
+        // so no reader can observe a queue and a track list from different edits.
+        let (was_current, new_current) = {
+            let mut q = self.queue.lock().unwrap();
+            let mut tracks = self.tracks.lock().unwrap();
+            let Some(track) = q.track_at(position) else {
+                return;
+            };
+            let was_current = q.current() == Some(track);
+            let next = q.without_position(position);
+            tracks.remove(track);
+            *q = next;
+            (was_current, q.current())
+        };
+
+        if was_current {
+            match new_current {
+                Some(track) => self.advance_to(track),
+                None => self.push(Cmd::Stop),
+            }
+        } else {
+            self.push(Cmd::Refresh);
+        }
+        self.bump_queue_version();
+    }
+
+    /// Empty the session queue and stop playback. Repeat and shuffle survive,
+    /// so clearing the list never silently resets those preferences.
+    pub fn clear_queue(&self) {
+        {
+            let mut q = self.queue.lock().unwrap();
+            let mut tracks = self.tracks.lock().unwrap();
+            tracks.clear();
+            *q = q.cleared();
+        }
+        self.bump_queue_version();
+        self.push(Cmd::Stop);
+    }
+
     /// Next unique shuffle seed: monotonic SplitMix64 steps, so consecutive
     /// calls never reuse a permutation.
     fn next_shuffle_seed(&self) -> u64 {
@@ -1509,6 +1552,161 @@ mod tests {
             "current stays pinned at the front"
         );
         player.shutdown();
+    }
+
+    // ---- session queue: manual remove (issue #19) ----
+
+    /// Three 2-second tracks in a temp dir, for the remove/clear tests.
+    fn remove_fixture(name: &str) -> (Vec<Track>, TempDirLike) {
+        let dir = test_dir(name);
+        let paths: Vec<_> = ["a", "b", "c"]
+            .iter()
+            .map(|n| dir.join(format!("{n}.wav")))
+            .collect();
+        for p in &paths {
+            write_wav(p, 2.0);
+        }
+        let titles = ["A", "B", "C"];
+        let tracks = paths
+            .iter()
+            .zip(titles)
+            .map(|(p, t)| track(p.to_str().unwrap(), t, 2.0))
+            .collect();
+        (tracks, TempDirLike(dir))
+    }
+
+    /// Keeps the temp dir alive for the duration of a test.
+    struct TempDirLike(std::path::PathBuf);
+    impl Drop for TempDirLike {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn titles_of(player: &Player) -> Vec<String> {
+        player
+            .queue_tracks()
+            .iter()
+            .map(|t| t.title.clone())
+            .collect()
+    }
+
+    #[test]
+    fn removing_a_queued_track_keeps_playing_and_drops_it_from_the_order() {
+        if !have_libmpv() {
+            return;
+        }
+        let (tracks, _dir) = remove_fixture("remove-other");
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("starts playing A");
+
+        // Drop the upcoming B; A keeps playing and C takes its slot.
+        player.remove_queue_at(1);
+        assert_eq!(titles_of(&player), ["A", "C"]);
+        assert_eq!(
+            player.snapshot().current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "removing another track never interrupts playback"
+        );
+        // The published state catches up once the pump drains the refresh.
+        wait_for(&player, Duration::from_secs(5), |s| s.list_len == 2)
+            .expect("state reports the shorter queue");
+
+        player.next();
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("C")
+        })
+        .expect("next skips the removed track");
+        player.shutdown();
+    }
+
+    #[test]
+    fn removing_the_playing_track_hands_over_to_the_following_one() {
+        if !have_libmpv() {
+            return;
+        }
+        let (tracks, _dir) = remove_fixture("remove-current");
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("A")
+        })
+        .expect("starts playing A");
+
+        // Removing the current track advances to B, which slid into slot 0.
+        player.remove_queue_at(0);
+        assert_eq!(titles_of(&player), ["B", "C"]);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("B")
+        })
+        .expect("playback hands over to the next track");
+        player.shutdown();
+    }
+
+    #[test]
+    fn removing_the_last_playing_track_stops_and_leaves_no_current() {
+        if !have_libmpv() {
+            return;
+        }
+        let (tracks, _dir) = remove_fixture("remove-last");
+        let player = start_player();
+        player.play_tracks(tracks, 2);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("C")
+        })
+        .expect("starts playing C");
+
+        player.remove_queue_at(2);
+        // Only the playing track is gone; the earlier two stay in the queue.
+        assert_eq!(titles_of(&player), ["A", "B"]);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.list_len == 2 && s.current.is_none()
+        })
+        .expect("queue keeps its other tracks but nothing is selected");
+        player.shutdown();
+    }
+
+    #[test]
+    fn clearing_the_queue_stops_playback_but_keeps_repeat_and_shuffle() {
+        if !have_libmpv() {
+            return;
+        }
+        let (tracks, _dir) = remove_fixture("clear-queue");
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        player.set_shuffle(true);
+        player.set_repeat(RepeatMode::All);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.shuffle && s.current.is_some()
+        })
+        .expect("playing with shuffle on");
+
+        player.clear_queue();
+        assert!(player.queue_tracks().is_empty());
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.list_len == 0 && s.current.is_none() && s.shuffle && s.repeat == RepeatMode::All
+        })
+        .expect("queue emptied and stopped, with repeat + shuffle kept");
+
+        // A new list still comes up shuffled, proving the preference survived.
+        let (more, _d2) = remove_fixture("clear-queue-replay");
+        player.play_tracks(more, 0);
+        wait_for(&player, Duration::from_secs(5), |s| s.shuffle)
+            .expect("shuffle survived the clear");
+        player.shutdown();
+    }
+
+    #[test]
+    fn removing_out_of_range_positions_is_a_no_op() {
+        let queue = Queue::new(3).start(1);
+        assert_eq!(queue.without_position(9), queue);
+        assert_eq!(queue.without_position(3), queue);
+        assert_eq!(Queue::new(0).without_position(0).len, 0);
+        assert_eq!(queue.track_at(9), None);
     }
 
     #[test]

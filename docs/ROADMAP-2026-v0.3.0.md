@@ -34,14 +34,14 @@ expensive subsystems last.
 
 ## Checklist
 
-- [ ] **15** Tag editor reachable from playlist rows <!-- docs/issues/15-tag-editor-in-playlists.md -->
-- [ ] **16** UI rough edges: inert search box, scan-gated queue save, sticky
+- [x] **15** Tag editor reachable from playlist rows <!-- docs/issues/15-tag-editor-in-playlists.md -->
+- [x] **16** UI rough edges: inert search box, scan-gated queue save, sticky
       banners, native `confirm` <!-- docs/issues/16-ui-rough-edges.md -->
-- [ ] **17** Global shortcuts: seek ±10 s, `/` focus search, prev/next
+- [x] **17** Global shortcuts: seek ±10 s, `/` focus search, prev/next
       <!-- docs/issues/17-keyboard-shortcuts.md -->
-- [ ] **18** Playlist reorder in the UI (wires `reorderPlaylist`)
+- [x] **18** Playlist reorder in the UI (wires `reorderPlaylist`)
       <!-- docs/issues/18-playlist-reorder.md -->
-- [ ] **19** Queue: remove one track / clear the queue
+- [x] **19** Queue: remove one track / clear the queue
       <!-- docs/issues/19-queue-remove-clear.md -->
 - [ ] **20** Genre + decade filter chips (with indexes)
       <!-- docs/issues/20-genre-decade-filters.md -->

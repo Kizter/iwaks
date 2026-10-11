@@ -622,6 +622,27 @@ fn reorder_queue(from: usize, to: usize, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+/// Remove the queue track at play-order `position`. Removing the playing track
+/// moves on to the next one, or stops when the queue just ran out.
+#[tauri::command]
+fn remove_from_queue(position: usize, state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .remove_queue_at(position);
+    state.persist.touch();
+    Ok(())
+}
+
+/// Empty the session queue and stop playback (repeat/shuffle are kept).
+#[tauri::command]
+fn clear_queue(state: State<'_, AppState>) -> Result<(), String> {
+    player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .clear_queue();
+    state.persist.touch();
+    Ok(())
+}
+
 /// Save the current session queue as a playlist (trimmed non-empty name).
 /// Returns the new playlist id.
 #[tauri::command]
@@ -781,6 +802,8 @@ pub fn run() {
             export_m3u,
             get_queue,
             reorder_queue,
+            remove_from_queue,
+            clear_queue,
             save_queue_as_playlist,
             get_online_cover,
             set_online_cover
