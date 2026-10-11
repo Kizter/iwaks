@@ -1,14 +1,38 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { EqPreset, Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, TagEdits, Track } from "./types";
+import type {
+  EqPreset,
+  Lyrics,
+  Playlist,
+  PlayerState,
+  ReplayGainMode,
+  RepeatMode,
+  ScanEvent,
+  ScanProgress,
+  TagEdits,
+  Track,
+  TrackFilter,
+  TrackSort,
+} from "./types";
 
-export function getTracks(): Promise<Track[]> {
-  return invoke<Track[]>("get_tracks");
+/** Tracks in the library, narrowed and ordered by the filter bar (issues #20/#21). */
+export function getTracks(filter: TrackFilter, sort: TrackSort): Promise<Track[]> {
+  return invoke<Track[]>("get_tracks", { filter, sort });
 }
 
-export function searchTracks(query: string): Promise<Track[]> {
-  return invoke<Track[]>("search_tracks", { query });
+export function searchTracks(query: string, filter: TrackFilter, sort: TrackSort): Promise<Track[]> {
+  return invoke<Track[]>("search_tracks", { query, filter, sort });
+}
+
+/** Every genre in the library, for the filter chips (blank/NULL excluded). */
+export function listGenres(): Promise<string[]> {
+  return invoke<string[]>("list_genres");
+}
+
+/** Decades holding at least one dated track, newest first. */
+export function listDecades(): Promise<number[]> {
+  return invoke<number[]>("list_decades");
 }
 
 export function scanFolder(path: string): Promise<void> {

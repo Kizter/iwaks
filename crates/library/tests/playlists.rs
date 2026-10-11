@@ -344,7 +344,7 @@ fn migration_from_v1_preserves_tracks_and_adds_playlists() {
         .conn()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3, "a v1 library lands on the current schema");
+    assert_eq!(version, 4, "a v1 library lands on the current schema");
 }
 
 // ---------- bulk add (save-as-playlist, M4 slice 2) ----------

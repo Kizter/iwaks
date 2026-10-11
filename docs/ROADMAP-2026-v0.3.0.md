@@ -43,9 +43,9 @@ expensive subsystems last.
       <!-- docs/issues/18-playlist-reorder.md -->
 - [x] **19** Queue: remove one track / clear the queue
       <!-- docs/issues/19-queue-remove-clear.md -->
-- [ ] **20** Genre + decade filter chips (with indexes)
+- [x] **20** Genre + decade filter chips (with indexes)
       <!-- docs/issues/20-genre-decade-filters.md -->
-- [ ] **21** Sort control (artist/album/title/added/duration)
+- [x] **21** Sort control (artist/album/title/added/duration)
       <!-- docs/issues/21-sort-control.md -->
 - [ ] **22** File logging + panic hook (needs `panic = "unwind"`)
       <!-- docs/issues/22-file-logging-panic-hook.md -->

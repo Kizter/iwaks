@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use iwaks_core::track::{TagEdits, Track};
-use iwaks_library::db::Library;
+use iwaks_library::db::{Library, TrackFilter, TrackSort};
 use iwaks_library::persist::EqPreset;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
@@ -155,18 +155,41 @@ fn player(state: &AppState) -> Option<Arc<Player>> {
 
 /// All library tracks, sorted artist → album → title.
 #[tauri::command]
-fn get_tracks(state: State<'_, AppState>) -> Result<Vec<Track>, String> {
-    open_lib(&state)?.all_tracks().map_err(|e| e.to_string())
+fn get_tracks(
+    filter: TrackFilter,
+    sort: TrackSort,
+    state: State<'_, AppState>,
+) -> Result<Vec<Track>, String> {
+    open_lib(&state)?
+        .tracks_filtered(None, &filter, sort)
+        .map_err(|e| e.to_string())
 }
 
-/// Full-text search; a blank query returns the full library.
+/// Full-text search narrowed by `filter` and ordered by `sort`; a blank query
+/// returns the (filtered) library.
 #[tauri::command]
-fn search_tracks(query: String, state: State<'_, AppState>) -> Result<Vec<Track>, String> {
+fn search_tracks(
+    query: String,
+    filter: TrackFilter,
+    sort: TrackSort,
+    state: State<'_, AppState>,
+) -> Result<Vec<Track>, String> {
     let lib = open_lib(&state)?;
-    if query.trim().is_empty() {
-        return lib.all_tracks().map_err(|e| e.to_string());
-    }
-    lib.search(&query).map_err(|e| e.to_string())
+    let q = (!query.trim().is_empty()).then_some(query);
+    lib.tracks_filtered(q.as_deref(), &filter, sort)
+        .map_err(|e| e.to_string())
+}
+
+/// Every genre in the library, for the filter chips.
+#[tauri::command]
+fn list_genres(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    open_lib(&state)?.genres().map_err(|e| e.to_string())
+}
+
+/// Decades holding at least one dated track, newest first.
+#[tauri::command]
+fn list_decades(state: State<'_, AppState>) -> Result<Vec<i64>, String> {
+    open_lib(&state)?.decades().map_err(|e| e.to_string())
 }
 
 /// Album art for a track file as a `data:` URL (`None` when the file has no
@@ -765,6 +788,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_tracks,
             search_tracks,
+            list_genres,
+            list_decades,
             scan_folder,
             add_files,
             read_cover,

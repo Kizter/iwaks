@@ -21,6 +21,8 @@ import {
   importM3u,
   listenPlayer,
   listenScan,
+  listDecades,
+  listGenres,
   listPlaylists,
   pickFiles,
   pickFolder,
@@ -48,9 +50,11 @@ import { NowPlaying } from "./NowPlaying";
 import PlayerBar from "./PlayerBar";
 import Settings from "./Settings";
 import {
+  ArrowsDownUp,
   CaretLeft,
   DotsSixVertical,
   Folder,
+  FunnelSimple,
   GearSix,
   ListBullets,
   MagnifyingGlass,
@@ -63,13 +67,21 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
-import type { Playlist, PlayerState, ScanProgress, Track } from "./types";
+import type { Playlist, PlayerState, ScanProgress, Track, TrackFilter, TrackSort } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
 
 const ROW_HEIGHT = 56;
 
 /** Seconds moved by the ← / → seek shortcuts. */
 const SEEK_STEP = 10;
+
+/** Sort choices offered by the filter bar (issue #21). */
+const SORT_OPTIONS: Array<{ value: TrackSort; label: string }> = [
+  { value: "artistAlbum", label: "Artist → Album" },
+  { value: "title", label: "Title" },
+  { value: "added", label: "Newest first" },
+  { value: "longest", label: "Longest first" },
+];
 
 // ---- library navigation views (grouped browse) ----
 
@@ -225,23 +237,33 @@ function buildFolderTree(tracks: Track[]): FolderTree {
   return { stats, roots };
 }
 
-/** Debounced search-as-you-type hook. Blank query → full library. */
-function useSearch(query: string, refreshKey: number) {
+/** Debounced search-as-you-type hook, narrowed by the filter bar. A blank
+ *  query returns the whole (filtered, sorted) library. */
+function useTracks(
+  query: string,
+  filter: TrackFilter,
+  sort: TrackSort,
+  refreshKey: number,
+) {
   const [tracks, setTracks] = useState<Track[] | null>(null);
   useEffect(() => {
     let alive = true;
     const timer = setTimeout(() => {
-      const run = query.trim() === "" ? getTracks() : searchTracks(query);
-      run.then((t) => {
-        if (alive) setTracks(t);
-      });
+      const run = query.trim() === "" ? getTracks(filter, sort) : searchTracks(query, filter, sort);
+      run
+        .then((t) => {
+          if (alive) setTracks(t);
+        })
+        // Keep the rows already on screen rather than throwing away the list
+        // because one refetch failed.
+        .catch(() => {});
     }, 180);
     return () => {
       alive = false;
       clearTimeout(timer);
     };
     // refreshKey: bump after scan/add so the list reflects new rows.
-  }, [query, refreshKey]);
+  }, [query, filter, sort, refreshKey]);
   return tracks;
 }
 
@@ -1182,7 +1204,15 @@ function App() {
   // The album-art-first Now Playing surface (issue #10). Kept separate from
   // `view` so closing it returns to whatever the library was showing.
   const [nowPlaying, setNowPlaying] = useState(false);
-  const tracks = useSearch(query, refreshKey);
+  // Library narrowing + ordering (issues #20, #21). The filter object is
+  // memoised so the query hook only refetches when a value really changes.
+  const [genre, setGenre] = useState<string | null>(null);
+  const [decade, setDecade] = useState<number | null>(null);
+  const [sort, setSort] = useState<TrackSort>("artistAlbum");
+  const filter = useMemo<TrackFilter>(() => ({ genre, decade }), [genre, decade]);
+  const [genres, setGenres] = useState<string[]>([]);
+  const [decades, setDecades] = useState<number[]>([]);
+  const tracks = useTracks(query, filter, sort, refreshKey);
 
   // ---- session queue (M4 slice 2) ----
   const [queue, setQueue] = useState<Track[] | null>(null);
@@ -1198,6 +1228,21 @@ function App() {
   const [plDraft, setPlDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
+
+  // Facets for the filter chips, refetched after a scan brings in new tags.
+  useEffect(() => {
+    let alive = true;
+    Promise.all([listGenres(), listDecades()])
+      .then(([g, d]) => {
+        if (!alive) return;
+        setGenres(g);
+        setDecades(d);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [refreshKey]);
 
   // Success notices fade on their own; error banners never do.
   useEffect(() => {
@@ -1368,13 +1413,16 @@ function App() {
   useEffect(() => {
     if (tracks === null && status === "loading") {
       const t = setTimeout(
-        () => getTracks().catch((e) => setLoadError(friendlyError(e))).finally(() => setStatus("ready")),
+        () =>
+          getTracks(filter, sort)
+            .catch((e) => setLoadError(friendlyError(e)))
+            .finally(() => setStatus("ready")),
         1200,
       );
       return () => clearTimeout(t);
     }
     if (tracks !== null && status === "loading") setStatus("ready");
-  }, [tracks, status]);
+  }, [tracks, status, filter, sort]);
 
   // ---- playlists: list load, detail load on entry, picker Esc handler ----
   useEffect(() => {
@@ -1756,11 +1804,18 @@ function App() {
           ? false // the queue renders its own empty state below
           : !hasQuery && (isGrid ? groups.length === 0 : showing.length === 0)
     : false;
+  // A genre/decade filter narrows just like typing does, so the empty state
+  // has to account for it too (issue #20).
+  const hasFilter = genre !== null || decade !== null;
+  const clearFilters = useCallback(() => {
+    setGenre(null);
+    setDecade(null);
+  }, []);
   // A search/filter matched nothing: distinct from both the onboarding empty
   // state and an empty playlist.
   const noResults =
     ready &&
-    hasQuery &&
+    (hasQuery || hasFilter) &&
     (isPlaylistDetail
       ? (filteredPlTracks?.length ?? 0) === 0
       : !isQueue && !isPlaylists && (isGrid ? groups.length === 0 : showing.length === 0));
@@ -1986,6 +2041,66 @@ function App() {
         </div>
       </div>
 
+      {searchApplies && (genres.length > 0 || decades.length > 0) && (
+        <div className="filter-bar" role="group" aria-label="Filter and sort the library">
+          {genres.length > 0 && (
+            <label className="filter-ctl">
+              <FunnelSimple size={14} aria-hidden="true" />
+              <span className="visually-hidden">Filter by genre</span>
+              <select
+                value={genre ?? ""}
+                aria-label="Filter by genre"
+                onChange={(e) => setGenre(e.target.value || null)}
+              >
+                <option value="">All genres</option>
+                {genres.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {decades.length > 0 && (
+            <label className="filter-ctl">
+              <span className="visually-hidden">Filter by decade</span>
+              <select
+                value={decade ?? ""}
+                aria-label="Filter by decade"
+                onChange={(e) => setDecade(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">All years</option>
+                {decades.map((d) => (
+                  <option key={d} value={d}>
+                    {d}s
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="filter-ctl">
+            <ArrowsDownUp size={14} aria-hidden="true" />
+            <span className="visually-hidden">Sort tracks by</span>
+            <select
+              value={sort}
+              aria-label="Sort tracks by"
+              onChange={(e) => setSort(e.target.value as TrackSort)}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasFilter && (
+            <button className="btn-ghost" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
       {scanning && scanProg && (
         <div className="progress" role="status" aria-label="Scanning your music folder">
           <div className="progress-bar">
@@ -2089,11 +2204,28 @@ function App() {
         ) : noResults ? (
           <div className="empty no-results">
             <MagnifyingGlass className="empty-mark-icon" size={34} aria-hidden="true" />
-            <h2>{`No results for “${query.trim()}”`}</h2>
-            <p>Check the spelling, or try a different song, artist, or album.</p>
-            <button className="btn-ghost" onClick={() => setQuery("")}>
-              Clear search
-            </button>
+            <h2>
+              {hasQuery
+                ? `No results for “${query.trim()}”`
+                : "Nothing matches those filters"}
+            </h2>
+            <p>
+              {hasFilter
+                ? "No tracks in your library match this genre and year."
+                : "Check the spelling, or try a different song, artist, or album."}
+            </p>
+            <div className="empty-actions">
+              {hasQuery && (
+                <button className="btn-ghost" onClick={() => setQuery("")}>
+                  Clear search
+                </button>
+              )}
+              {hasFilter && (
+                <button className="btn-ghost" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
           </div>
         ) : isEmpty ? (
           <div className="empty">

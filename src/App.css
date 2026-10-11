@@ -439,6 +439,33 @@ body {
   color: var(--ink-strong);
 }
 
+/* ---------- filter / sort bar ---------- */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+}
+
+.filter-ctl select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: var(--font-sm);
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
 /* ---------- keyboard shortcuts list ---------- */
 
 .set-keys {

@@ -84,6 +84,17 @@ export interface EqPreset {
   gains: number[];
 }
 
+/** Mirrors iwaks_library::db::TrackFilter (serde camelCase). */
+export interface TrackFilter {
+  /** Exact stored genre spelling, or `null` for every genre. */
+  genre: string | null;
+  /** Inclusive decade start — `1990` matches 1990–1999. */
+  decade: number | null;
+}
+
+/** Mirrors iwaks_library::db::TrackSort (serde camelCase). */
+export type TrackSort = "artistAlbum" | "title" | "added" | "longest";
+
 /** Mirrors iwaks_tags::lyrics::TimedLine. */
 export interface LyricsLine {
   time: number;
