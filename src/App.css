@@ -466,6 +466,23 @@ body {
   cursor: pointer;
 }
 
+.set-select {
+  flex: none;
+  max-width: 340px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.set-select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .set-log-path {
   flex: none;
   max-width: 340px;

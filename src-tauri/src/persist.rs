@@ -194,6 +194,7 @@ mod tests {
             eq_preamp: -2.0,
             eq: vec![1.0; 10],
             replaygain: ReplayGainMode::Album,
+            audio_device: String::new(),
         }
     }
 

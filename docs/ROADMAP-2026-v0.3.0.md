@@ -49,8 +49,8 @@ expensive subsystems last.
       <!-- docs/issues/21-sort-control.md -->
 - [x] **22** File logging + panic hook (needs `panic = "unwind"`)
       <!-- docs/issues/22-file-logging-panic-hook.md -->
-- [ ] **23** Output device picker <!-- docs/issues/23-output-device-picker.md -->
-- [ ] **24** WASAPI exclusive-output toggle
+- [x] **23** Output device picker <!-- docs/issues/23-output-device-picker.md -->
+- [x] **24** WASAPI exclusive-output toggle
       <!-- docs/issues/24-wasapi-exclusive-toggle.md -->
 - [ ] **25** Dark mode <!-- docs/issues/25-dark-mode.md -->
 - [ ] **26** Crossfade <!-- docs/issues/26-crossfade.md -->

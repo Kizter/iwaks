@@ -56,7 +56,24 @@ pub struct Options {
     /// Iwaks runs"). Shared mode keeps other apps audible and is the default.
     /// Deviation from design §4.2 "bit-perfect".
     pub audio_exclusive: bool,
+    /// mpv `audio-device` name; empty means "let the OS pick" (issue #23).
+    pub audio_device: String,
 }
+
+/// One entry of mpv's `audio-device-list` (issue #23).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevice {
+    /// mpv's identifier — what gets sent back to select it.
+    pub name: String,
+    /// Human label shown in the picker.
+    pub description: String,
+}
+
+/// How long a caller waits for the pump to answer a device request. The pump
+/// wakes at least every [`WAIT_SLICE`], so this is generous; it only exists so
+/// a wedged audio stack cannot hang the UI thread forever.
+const DEVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Full playback state pushed to the frontend on `player-state`.
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +107,9 @@ pub struct PlayerState {
     pub eq: Vec<f64>,
     /// ReplayGain mode applied by libmpv.
     pub replaygain: ReplayGainMode,
+    /// Active mpv `audio-device` (empty = the OS default), so Settings can show
+    /// which output is in use even after the device is unplugged (issue #23).
+    pub audio_device: String,
 }
 
 /// ReplayGain mode (libmpv `replaygain` option).
@@ -183,13 +203,20 @@ enum Cmd {
     ToggleMute,
     SetMute(bool),
     SetSpeed(f64),
-    SetEq { preamp: f64, gains: Vec<f64> },
+    SetEq {
+        preamp: f64,
+        gains: Vec<f64>,
+    },
     SetReplayGain(ReplayGainMode),
     SetShuffle(bool),
     Reshuffle,
     Stop,
     SleepElapsed,
     Refresh,
+    /// Ask the pump to read `audio-device-list` and answer on the channel.
+    ListDevices(mpsc::Sender<Vec<AudioDevice>>),
+    /// Apply a new `audio-device` on the pump thread.
+    SetAudioDevice(String),
 }
 
 pub struct Player {
@@ -226,6 +253,48 @@ pub struct Player {
     cancelled: AtomicBool,
 }
 
+/// Parse mpv's `audio-device-list` property.
+///
+/// The property is a JSON array of `{"name": …, "description": …}`; mpv also
+/// offers an "auto"/default entry with a null name. Anything unparseable
+/// yields an empty list rather than an error, because the caller can still fall
+/// back to "system default".
+fn read_device_list(api: &Mpv) -> Vec<AudioDevice> {
+    /// mpv's entry shape. The system default has a null `name`, so both fields
+    /// are optional here even though [`AudioDevice`] keeps them concrete.
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
+    }
+
+    let Ok(raw) = api.get_string("audio-device-list") else {
+        iwaks_log::line(
+            iwaks_log::Level::Warn,
+            "could not read mpv audio-device-list",
+        );
+        return Vec::new();
+    };
+    match serde_json::from_str::<Vec<Raw>>(&raw) {
+        Ok(list) => list
+            .into_iter()
+            .map(|d| AudioDevice {
+                name: d.name.unwrap_or_default(),
+                description: d.description.unwrap_or_default(),
+            })
+            .collect(),
+        Err(e) => {
+            iwaks_log::line(
+                iwaks_log::Level::Warn,
+                &format!("audio-device-list was not the expected JSON ({e})"),
+            );
+            Vec::new()
+        }
+    }
+}
+
 impl Player {
     /// Spawn the pump thread, which owns the whole libmpv lifecycle, and wait
     /// until mpv is initialized (or initialization failed).
@@ -250,6 +319,7 @@ impl Player {
                 eq_preamp: 0.0,
                 eq: vec![0.0; EQ_BANDS.len()],
                 replaygain: ReplayGainMode::Track,
+                audio_device: options.audio_device.clone(),
             }),
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
@@ -313,6 +383,10 @@ impl Player {
         }
         if options.audio_exclusive {
             apply("audio-exclusive", "yes")?;
+        }
+        if !options.ao_null && !options.audio_device.is_empty() {
+            // Startup device choice (issue #23); "auto" when nothing is stored.
+            apply("audio-device", &options.audio_device)?;
         }
         apply("audio-client-name", "Iwaks")?;
         apply("volume-max", "100")?;
@@ -469,6 +543,33 @@ impl Player {
         *self.queue.lock().unwrap() = next;
         self.bump_queue_version();
         self.push(Cmd::Refresh);
+    }
+
+    /// Audio devices mpv can output to, read on the pump thread.
+    ///
+    /// Returns an empty list (never blocks) if the audio stack does not answer
+    /// within [`DEVICE_TIMEOUT`] — the caller still has "system default".
+    pub fn list_devices(&self) -> Vec<AudioDevice> {
+        let (tx, rx) = mpsc::channel();
+        self.push(Cmd::ListDevices(tx));
+        match rx.recv_timeout(DEVICE_TIMEOUT) {
+            Ok(devices) => devices,
+            Err(_) => {
+                iwaks_log::line(
+                    iwaks_log::Level::Warn,
+                    "audio device list timed out waiting for the playback thread",
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    /// Switch the output device; an empty `name` restores "let the OS choose".
+    ///
+    /// Applied by the pump like every other mpv change, so a failed switch leaves
+    /// the current output untouched and is visible in the next state tick.
+    pub fn set_audio_device(&self, name: &str) {
+        self.push(Cmd::SetAudioDevice(name.to_string()));
     }
 
     /// Record that the queue order changed; the next emitted state carries a
@@ -722,6 +823,27 @@ impl Player {
                 self.emit();
             }
             Cmd::Refresh => self.emit(),
+            // Both device commands run here because they read/set mpv
+            // properties, and only the pump may touch libmpv.
+            Cmd::ListDevices(reply) => {
+                let devices = read_device_list(&self.api());
+                let _ = reply.send(devices);
+            }
+            Cmd::SetAudioDevice(name) => {
+                // mpv reads an empty `audio-device` as "let the OS choose".
+                let value = if name.is_empty() {
+                    "auto"
+                } else {
+                    name.as_str()
+                };
+                if let Err(e) = self.api().command(&["set", "audio-device", value]) {
+                    iwaks_log::line(
+                        iwaks_log::Level::Warn,
+                        &format!("audio-device '{value}' rejected by mpv ({e})"),
+                    );
+                }
+                self.emit();
+            }
         }
     }
 
@@ -898,6 +1020,7 @@ impl Player {
             eq_preamp,
             eq,
             replaygain,
+            audio_device: api.get_string("audio-device").unwrap_or_default(),
         }
     }
 }
@@ -945,6 +1068,7 @@ mod tests {
                 eq_preamp: 0.0,
                 eq: vec![0.0; EQ_BANDS.len()],
                 replaygain: ReplayGainMode::Track,
+                audio_device: String::new(),
             }),
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
@@ -1060,6 +1184,7 @@ mod tests {
             &Options {
                 ao_null: true,
                 audio_exclusive: false,
+                audio_device: String::new(),
             },
             sink,
         )
@@ -1707,6 +1832,99 @@ mod tests {
         assert_eq!(queue.without_position(3), queue);
         assert_eq!(Queue::new(0).without_position(0).len, 0);
         assert_eq!(queue.track_at(9), None);
+    }
+
+    // ---- audio output (#23, #24) ----
+
+    #[test]
+    fn device_list_is_read_from_the_pump_and_answers_the_caller() {
+        if !have_libmpv() {
+            return;
+        }
+        let player = start_player();
+        // WASAPI always offers the automatic entry, so this cannot be empty.
+        let devices = player.list_devices();
+        assert!(
+            !devices.is_empty(),
+            "mpv reported at least the default device"
+        );
+        assert!(
+            devices
+                .iter()
+                .all(|d| !d.name.is_empty() || !d.description.is_empty()),
+            "every entry carries something to show: {devices:?}"
+        );
+        // Second call works too: the pump stays responsive after answering.
+        assert!(!player.list_devices().is_empty());
+        player.shutdown();
+    }
+
+    #[test]
+    fn choosing_a_device_is_reflected_in_the_published_state() {
+        if !have_libmpv() {
+            return;
+        }
+        let player = start_player();
+        assert_eq!(
+            player.snapshot().audio_device,
+            "",
+            "no device stored means the OS picks"
+        );
+
+        // Whatever mpv accepts, the state must agree with it afterwards — an
+        // unknown name is rejected, and then the state still says what is in
+        // use rather than what we asked for.
+        let target = player
+            .list_devices()
+            .into_iter()
+            .find(|d| !d.name.is_empty())
+            .map(|d| d.name);
+        if let Some(name) = target {
+            player.set_audio_device(&name);
+            wait_for(&player, Duration::from_secs(5), |s| s.audio_device == name)
+                .expect("state reports the selected device");
+        }
+
+        player.set_audio_device("iwaks-not-a-real-device");
+        wait_for(&player, Duration::from_secs(5), |s| {
+            s.audio_device != "iwaks-not-a-real-device"
+        })
+        .expect("a rejected device is not reported as active");
+        player.shutdown();
+    }
+
+    #[test]
+    fn the_system_default_choice_does_not_wedge_the_playback_thread() {
+        if !have_libmpv() {
+            return;
+        }
+        let player = start_player();
+        player.set_audio_device("iwaks-not-a-real-device");
+        player.set_audio_device(""); // back to "let the OS decide"
+
+        // mpv resolves "auto" to whatever it picked and need not report an
+        // empty name, so the promise is only that both requests are answered in
+        // order and that a rejected switch never sticks.
+        assert!(!player.list_devices().is_empty(), "pump still answering");
+        assert_ne!(player.snapshot().audio_device, "iwaks-not-a-real-device");
+        player.shutdown();
+    }
+
+    #[test]
+    fn a_device_list_that_is_not_json_degrades_to_empty() {
+        // Guards the fallback path without a live mpv: the parse is the only
+        // thing between a weird property value and a hang in the UI thread.
+        let parsed: Result<Vec<AudioDevice>, _> = serde_json::from_str::<Vec<AudioDevice>>(
+            r#"[{"name":"wasapi/a","description":"Speakers"}]"#,
+        );
+        assert_eq!(
+            parsed.unwrap(),
+            [AudioDevice {
+                name: "wasapi/a".to_string(),
+                description: "Speakers".to_string()
+            }]
+        );
+        assert!(serde_json::from_str::<Vec<AudioDevice>>("not json").is_err());
     }
 
     #[test]

@@ -71,6 +71,8 @@ export interface PlayerState {
   eq: number[];
   /** ReplayGain mode applied by libmpv. */
   replaygain: ReplayGainMode;
+  /** Active mpv `audio-device` (empty = system default). */
+  audioDevice: string;
 }
 
 /** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */

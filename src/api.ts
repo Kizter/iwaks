@@ -160,6 +160,38 @@ export function getLogPath(): Promise<string | null> {
   return invoke<string | null>("log_path");
 }
 
+/** Mirrors iwaks_player::AudioDevice (serde camelCase). */
+export interface AudioDevice {
+  /** mpv identifier; empty string is the system default. */
+  name: string;
+  description: string;
+}
+
+/** Output devices mpv can use (issue #23). */
+export function listAudioDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>("list_audio_devices");
+}
+
+/** Pick an output device; `""` restores "system default". */
+export function setAudioDevice(name: string): Promise<void> {
+  return invoke<void>("set_audio_device", { name });
+}
+
+/** The stored device name (`""` = system default). */
+export function getAudioDevice(): Promise<string> {
+  return invoke<string>("get_audio_device");
+}
+
+/** Whether exclusive (bit-perfect) output is on (issue #24). */
+export function getAudioExclusive(): Promise<boolean> {
+  return invoke<boolean>("get_audio_exclusive");
+}
+
+/** Turn exclusive output on/off; applied at the next start. */
+export function setAudioExclusive(enabled: boolean): Promise<void> {
+  return invoke<void>("set_audio_exclusive", { enabled });
+}
+
 /** The user's saved equalizer presets (empty when none have been saved). */
 export function getEqPresets(): Promise<EqPreset[]> {
   return invoke<EqPreset[]>("get_eq_presets");

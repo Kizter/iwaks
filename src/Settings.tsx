@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
-import { DiscordLogo, Keyboard, NotePencil } from "@phosphor-icons/react";
-import { getLogPath, getOnlineCover, setOnlineCover } from "./api";
+import { DiscordLogo, Keyboard, NotePencil, SpeakerHigh } from "@phosphor-icons/react";
+import {
+  getAudioDevice,
+  getAudioExclusive,
+  getLogPath,
+  getOnlineCover,
+  listAudioDevices,
+  setAudioDevice,
+  setAudioExclusive,
+  setOnlineCover,
+  type AudioDevice,
+} from "./api";
 import { friendlyError } from "./format";
 
 /** Every global shortcut, so the keys are discoverable without a manual. */
@@ -22,6 +32,12 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logFile, setLogFile] = useState<string | null>(null);
+  // Audio output (issues #23, #24). `devices` is fetched when the picker opens
+  // so it can never be a stale hot-plug snapshot.
+  const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [device, setDevice] = useState<string | null>(null);
+  const [exclusive, setExclusive] = useState<boolean | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -49,6 +65,48 @@ export default function Settings() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([getAudioDevice(), getAudioExclusive()])
+      .then(([d, x]) => {
+        if (!alive) return;
+        setDevice(d);
+        setExclusive(x);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Enumerated on demand: mpv has no change event we consume, and opening the
+  // picker is the moment a stale list would actually be noticed.
+  const loadDevices = () => {
+    setDevicesLoading(true);
+    listAudioDevices()
+      .then((list) => setDevices(list))
+      .catch((e: unknown) => setError(`Couldn't list audio devices — ${friendlyError(e)}`))
+      .finally(() => setDevicesLoading(false));
+  };
+
+  const pickDevice = (name: string) => {
+    const previous = device;
+    setDevice(name);
+    void setAudioDevice(name).catch((e: unknown) => {
+      setDevice(previous);
+      setError(`Couldn't switch audio device — ${friendlyError(e)}`);
+    });
+  };
+
+  const toggleExclusive = (next: boolean) => {
+    const previous = exclusive;
+    setExclusive(next);
+    void setAudioExclusive(next).catch((e: unknown) => {
+      setExclusive(previous);
+      setError(`Couldn't save that setting — ${friendlyError(e)}`);
+    });
+  };
 
   const toggle = (next: boolean) => {
     const previous = onlineCover;
@@ -103,6 +161,67 @@ export default function Settings() {
           </div>
 
           {error && <p className="set-error">{error}</p>}
+        </section>
+
+        <section className="set-group" aria-labelledby="set-audio">
+          <h2 className="set-group-title" id="set-audio">
+            <SpeakerHigh size={18} aria-hidden="true" />
+            Audio output
+          </h2>
+
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title" id="set-device">
+                Output device
+              </span>
+              <span className="set-note">
+                Where playback goes. Your choice is remembered, and the list is read
+                again each time you open this page — so a device you just plugged
+                in is here.
+              </span>
+            </div>
+            <select
+              className="set-select"
+              aria-labelledby="set-device"
+              value={device ?? ""}
+              disabled={devicesLoading || device === null}
+              onFocus={loadDevices}
+              onClick={loadDevices}
+              onChange={(e) => pickDevice(e.target.value)}
+            >
+              <option value="">System default</option>
+              {devices.map((d) => (
+                <option key={d.name || "default"} value={d.name}>
+                  {d.description || d.name || "System default"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title" id="set-exclusive">
+                Exclusive mode
+              </span>
+              <span className="set-note">
+                Bit-perfect output for hi-res playback. It takes exclusive control
+                of the device, which silences other apps for as long as Iwaks
+                plays — off is the default, and the switch takes effect the next
+                time Iwaks starts.
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={exclusive ?? false}
+              aria-labelledby="set-exclusive"
+              className={`switch${exclusive ? " on" : ""}`}
+              disabled={exclusive === null}
+              onClick={() => toggleExclusive(!exclusive)}
+            >
+              <span className="switch-knob" aria-hidden="true" />
+            </button>
+          </div>
         </section>
 
         <section className="set-group" aria-labelledby="set-log">

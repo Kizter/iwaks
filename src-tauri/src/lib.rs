@@ -7,7 +7,9 @@ use iwaks_library::db::{Library, TrackFilter, TrackSort};
 use iwaks_library::persist::EqPreset;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
-use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
+use iwaks_player::{
+    AudioDevice, Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode,
+};
 use iwaks_presence::NowPlaying;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -109,6 +111,29 @@ fn open_lib(state: &AppState) -> Result<Library, String> {
     Library::open(&state.db_path.to_string_lossy()).map_err(|e| e.to_string())
 }
 
+/// Keys for the audio-output settings (issues #23, #24). Plain text, like every
+/// other entry in the `settings` table.
+pub const SETTING_AUDIO_DEVICE: &str = "audio.device";
+pub const SETTING_AUDIO_EXCLUSIVE: &str = "audio.exclusive";
+
+fn read_setting(db_path: &Path, key: &str) -> Option<String> {
+    Library::open(&db_path.to_string_lossy())
+        .ok()
+        .and_then(|lib| lib.setting(key).ok().flatten())
+}
+
+/// Playback options from the stored audio settings.
+///
+/// Read before the player exists, so a missing or unreadable database simply
+/// yields the defaults — playback is never blocked by a settings problem.
+fn startup_options(db_path: &Path) -> PlayerOptions {
+    PlayerOptions {
+        audio_device: read_setting(db_path, SETTING_AUDIO_DEVICE).unwrap_or_default(),
+        audio_exclusive: read_setting(db_path, SETTING_AUDIO_EXCLUSIVE).as_deref() == Some("true"),
+        ..PlayerOptions::default()
+    }
+}
+
 /// Whether the Rich Presence looks album art up online (opt-in).
 #[tauri::command]
 fn get_online_cover(state: State<'_, AppState>) -> Result<bool, String> {
@@ -136,6 +161,52 @@ fn set_online_cover(enabled: bool, state: State<'_, AppState>) -> Result<(), Str
 fn get_eq_presets(state: State<'_, AppState>) -> Result<Vec<EqPreset>, String> {
     open_lib(&state)?
         .load_eq_presets()
+        .map_err(|e| e.to_string())
+}
+
+/// Audio devices mpv can output to. Read from the playback thread on demand,
+/// so the list is never stale — no change event is needed (issue #23).
+#[tauri::command]
+fn list_audio_devices(state: State<'_, AppState>) -> Result<Vec<AudioDevice>, String> {
+    Ok(player(&state)
+        .ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?
+        .list_devices())
+}
+
+/// Pick the output device; an empty `name` means "system default".
+///
+/// Stored so the choice survives a restart, and applied immediately so the user
+/// hears the switch without replaying anything.
+#[tauri::command]
+fn set_audio_device(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let p = player(&state).ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?;
+    p.set_audio_device(&name);
+    open_lib(&state)?
+        .set_setting(SETTING_AUDIO_DEVICE, &name)
+        .map_err(|e| e.to_string())
+}
+
+/// The stored device name (`""` = system default).
+#[tauri::command]
+fn get_audio_device(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(read_setting(&state.db_path, SETTING_AUDIO_DEVICE).unwrap_or_default())
+}
+
+/// Whether exclusive (bit-perfect) output is on. Applied at startup, since
+/// libmpv only accepts the option before initialisation (issue #24).
+#[tauri::command]
+fn get_audio_exclusive(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(read_setting(&state.db_path, SETTING_AUDIO_EXCLUSIVE).as_deref() == Some("true"))
+}
+
+/// Turn exclusive output on/off; takes effect the next time Iwaks starts.
+#[tauri::command]
+fn set_audio_exclusive(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .set_setting(
+            SETTING_AUDIO_EXCLUSIVE,
+            if enabled { "true" } else { "false" },
+        )
         .map_err(|e| e.to_string())
 }
 
@@ -745,7 +816,7 @@ pub fn run() {
             }
 
             let player = match Player::start(
-                &PlayerOptions::default(),
+                &startup_options(&db_path),
                 Box::new(move |s: &PlayerState| {
                     let _ = handle.emit("player-state", s.clone());
                     let url = cover_for_tick(
@@ -838,6 +909,11 @@ pub fn run() {
             get_eq_presets,
             set_eq_presets,
             log_path,
+            list_audio_devices,
+            set_audio_device,
+            get_audio_device,
+            get_audio_exclusive,
+            set_audio_exclusive,
             stop_playback,
             get_player_state,
             get_lyrics,
