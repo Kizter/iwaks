@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use iwaks_library::db::Library;
-use iwaks_library::persist::{PlayerSettings, SessionSnapshot};
+use iwaks_library::persist::{EqPreset, PlayerSettings, SessionSnapshot};
 
 struct TempDir(PathBuf);
 impl TempDir {
@@ -75,4 +75,52 @@ fn saving_settings_replaces_the_previous_value() {
     s.repeat = "off".to_string();
     lib.save_player_settings(&s).unwrap();
     assert_eq!(lib.load_player_settings().unwrap(), Some(s));
+}
+
+fn eq_presets() -> Vec<EqPreset> {
+    vec![
+        EqPreset {
+            name: "My Rock".to_string(),
+            preamp: -1.0,
+            gains: vec![4.0, 3.0, 1.0, -1.0, -2.0, -1.0, 1.0, 3.0, 4.0, 4.0],
+        },
+        EqPreset {
+            name: "Podcast".to_string(),
+            preamp: -2.0,
+            gains: vec![-3.0, -2.0, -1.0, 1.0, 3.0, 4.0, 3.0, 1.0, 0.0, -1.0],
+        },
+    ]
+}
+
+#[test]
+fn eq_presets_survive_reopen() {
+    let tmp = TempDir::new("eq-presets");
+    let path = tmp.path("iwaks.db").to_string_lossy().to_string();
+
+    {
+        let lib = Library::open(&path).expect("open");
+        // Nothing written yet → an empty list, never an error.
+        assert_eq!(lib.load_eq_presets().unwrap(), Vec::new());
+        lib.save_eq_presets(&eq_presets()).unwrap();
+    }
+
+    let lib = Library::open(&path).expect("reopen");
+    assert_eq!(lib.load_eq_presets().unwrap(), eq_presets());
+}
+
+#[test]
+fn saving_eq_presets_replaces_the_previous_list() {
+    let lib = Library::open(":memory:").expect("open");
+    let first = vec![EqPreset {
+        name: "A".to_string(),
+        preamp: 0.0,
+        gains: vec![0.0; 10],
+    }];
+    lib.save_eq_presets(&first).unwrap();
+    lib.save_eq_presets(&eq_presets()).unwrap();
+    assert_eq!(lib.load_eq_presets().unwrap(), eq_presets());
+
+    // Saving an empty list clears the key rather than leaving the old one.
+    lib.save_eq_presets(&[]).unwrap();
+    assert_eq!(lib.load_eq_presets().unwrap(), Vec::new());
 }

@@ -998,6 +998,91 @@ body {
   background: var(--mint);
 }
 
+/* ---- EQ presets (template dropdown + save-as) ---- */
+
+.eq-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.eq-preset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+
+.eq-preset select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 2px 6px;
+  font-size: var(--font-sm);
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.eq-save,
+.eq-save-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.eq-save-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 3px 8px;
+  font-size: var(--font-sm);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.eq-save-btn {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 8px;
+}
+
+.eq-save-btn:hover:not(:disabled) {
+  background: var(--mint);
+}
+
+.eq-save-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.eq-delete {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.eq-delete:hover {
+  background: var(--mint);
+}
+
 .eq-bands {
   display: flex;
   justify-content: space-between;

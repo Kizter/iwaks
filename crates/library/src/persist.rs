@@ -11,6 +11,8 @@ use crate::db::{Library, LibraryError};
 pub const SETTING_PLAYER: &str = "player.settings";
 /// Key holding the [`SessionSnapshot`] blob.
 pub const SETTING_SESSION: &str = "player.session";
+/// Key holding the user's saved [`EqPreset`] list.
+pub const SETTING_EQ_PRESETS: &str = "player.eq_presets";
 
 /// Player preferences that survive a restart.
 ///
@@ -45,6 +47,17 @@ pub struct SessionSnapshot {
     pub shuffle: bool,
 }
 
+/// A named equalizer setup saved by the user. Built-in templates live in the
+/// frontend; only the user's own presets round-trip through here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EqPreset {
+    pub name: String,
+    pub preamp: f64,
+    /// 10 band gains in dB at the ISO frequencies.
+    pub gains: Vec<f64>,
+}
+
 impl Library {
     /// Write the player preferences blob, replacing any previous value.
     pub fn save_player_settings(&self, settings: &PlayerSettings) -> Result<(), LibraryError> {
@@ -69,6 +82,19 @@ impl Library {
         match self.setting(SETTING_SESSION)? {
             Some(raw) => Ok(Some(serde_json::from_str(&raw)?)),
             None => Ok(None),
+        }
+    }
+
+    /// Write the saved equalizer presets, replacing any previous list.
+    pub fn save_eq_presets(&self, presets: &[EqPreset]) -> Result<(), LibraryError> {
+        self.set_setting(SETTING_EQ_PRESETS, &serde_json::to_string(presets)?)
+    }
+
+    /// The saved equalizer presets; empty when none were ever saved.
+    pub fn load_eq_presets(&self) -> Result<Vec<EqPreset>, LibraryError> {
+        match self.setting(SETTING_EQ_PRESETS)? {
+            Some(raw) => Ok(serde_json::from_str(&raw)?),
+            None => Ok(Vec::new()),
         }
     }
 }

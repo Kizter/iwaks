@@ -76,6 +76,14 @@ export interface PlayerState {
 /** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */
 export type ReplayGainMode = "off" | "track" | "album";
 
+/** Mirrors iwaks_library::persist::EqPreset (serde camelCase). */
+export interface EqPreset {
+  name: string;
+  preamp: number;
+  /** 10 band gains in dB at the ISO frequencies. */
+  gains: number[];
+}
+
 /** Mirrors iwaks_tags::lyrics::TimedLine. */
 export interface LyricsLine {
   time: number;

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, TagEdits, Track } from "./types";
+import type { EqPreset, Lyrics, Playlist, PlayerState, ReplayGainMode, RepeatMode, ScanEvent, ScanProgress, TagEdits, Track } from "./types";
 
 export function getTracks(): Promise<Track[]> {
   return invoke<Track[]>("get_tracks");
@@ -129,6 +129,16 @@ export function playerSetSleepTimer(seconds: number | null): Promise<void> {
 /** Graphic EQ: master `preamp` dB + 10 band gains (dB). */
 export function playerSetEq(preamp: number, gains: number[]): Promise<void> {
   return invoke<void>("set_eq", { preamp, eq: gains });
+}
+
+/** The user's saved equalizer presets (empty when none have been saved). */
+export function getEqPresets(): Promise<EqPreset[]> {
+  return invoke<EqPreset[]>("get_eq_presets");
+}
+
+/** Replace the user's saved equalizer presets. */
+export function setEqPresets(presets: EqPreset[]): Promise<void> {
+  return invoke<void>("set_eq_presets", { presets });
 }
 
 export function playerSetReplayGain(mode: ReplayGainMode): Promise<void> {

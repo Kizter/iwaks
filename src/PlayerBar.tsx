@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Cover } from "./Cover";
 import { LyricsPanel } from "./LyricsPanel";
+import { BUILTIN_PRESETS, EQ_LABELS, EQ_ZERO, matchPreset } from "./eq";
 import { formatDuration } from "./format";
 import {
+  getEqPresets,
   playerNext,
   playerPrev,
   playerReshuffle,
@@ -16,9 +18,10 @@ import {
   playerSetVolume,
   playerToggleMute,
   playerTogglePlay,
+  setEqPresets,
   toggleMiniPlayer,
 } from "./api";
-import type { PlayerState, ReplayGainMode, RepeatMode } from "./types";
+import type { EqPreset, PlayerState, ReplayGainMode, RepeatMode } from "./types";
 import {
   DiceFour,
   Moon,
@@ -34,6 +37,7 @@ import {
   SlidersHorizontal,
   SpeakerHigh,
   SpeakerSlash,
+  Trash,
 } from "@phosphor-icons/react";
 
 const REPEAT_ORDER: RepeatMode[] = ["off", "all", "one"];
@@ -54,10 +58,6 @@ const SLEEP_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "3600", label: "60 min" },
   { value: "5400", label: "90 min" },
 ];
-
-/** Labels for the 10 EQ bands (ISO frequencies, matches EQ_BANDS in Rust). */
-const EQ_LABELS = ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
-const EQ_ZERO = Array(EQ_LABELS.length).fill(0) as number[];
 
 /** Compact dB label: "0", "-3.5", "+6". */
 function fmtDb(v: number): string {
@@ -80,6 +80,9 @@ export default function PlayerBar({
   const [sleepChoice, setSleepChoice] = useState("off");
   const [eqOpen, setEqOpen] = useState(false);
   const [eqDraft, setEqDraft] = useState<{ preamp: number; gains: number[] } | null>(null);
+  const [customPresets, setCustomPresets] = useState<EqPreset[]>([]);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [sleepOpen, setSleepOpen] = useState(false);
   const cur = state?.current ?? null;
@@ -100,6 +103,14 @@ export default function PlayerBar({
   const shownPreamp = eqDraft ? eqDraft.preamp : eqPreamp;
   const shownGain = (i: number) => (eqDraft ? eqDraft.gains[i] : eqGains[i]);
 
+  // The dropdown highlights the preset whose curve matches the live one.
+  const activePreset = matchPreset(eqPreamp, eqGains, [...BUILTIN_PRESETS, ...customPresets]);
+  const presetsMatch = (p: EqPreset) => p.name === activePreset?.name;
+  const activeCustom = activePreset && customPresets.some(presetsMatch) ? activePreset.name : null;
+  const presetValue = activePreset
+    ? `${customPresets.some(presetsMatch) ? "custom" : "builtin"}:${activePreset.name}`
+    : "";
+
   // When the timer runs out or is cleared from elsewhere, the select snaps
   // back to "Off" instead of showing a stale countdown value.
   useEffect(() => {
@@ -107,6 +118,20 @@ export default function PlayerBar({
       setSleepChoice("off");
     }
   }, [sleepRemaining, sleepChoice]);
+
+  // Load the user's saved EQ presets once; failures just leave the menu with
+  // the built-in templates (the dropdown degrades gracefully offline).
+  useEffect(() => {
+    let alive = true;
+    getEqPresets()
+      .then((presets) => {
+        if (alive) setCustomPresets(presets);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const commitSeek = () => {
     if (drag !== null) {
@@ -152,6 +177,42 @@ export default function PlayerBar({
   const resetEq = () => {
     setEqDraft(null);
     void playerSetEq(0, [...EQ_ZERO]);
+  };
+
+  /** Apply a preset from the dropdown (built-in or saved custom one). */
+  const onPickPreset = (value: string) => {
+    if (!value) return;
+    const preset = value.startsWith("custom:")
+      ? customPresets.find((p) => p.name === value.slice("custom:".length))
+      : BUILTIN_PRESETS.find((p) => p.name === value.slice("builtin:".length));
+    if (!preset) return;
+    setEqDraft(null);
+    void playerSetEq(preset.preamp, [...preset.gains]);
+  };
+
+  /** Persist the current curve (draft included) under a new or reused name. */
+  const savePreset = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = saveName.trim();
+    if (!name) return;
+    const base = eqBase();
+    const preset: EqPreset = { name, preamp: base.preamp, gains: [...base.gains] };
+    const i = customPresets.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+    const next =
+      i >= 0
+        ? customPresets.map((p, idx) => (idx === i ? preset : p))
+        : [...customPresets, preset];
+    setCustomPresets(next);
+    setSaveOpen(false);
+    setSaveName("");
+    void setEqPresets(next);
+  };
+
+  /** Remove one saved preset and persist the remaining list. */
+  const deleteCustomPreset = (name: string) => {
+    const next = customPresets.filter((p) => p.name !== name);
+    setCustomPresets(next);
+    void setEqPresets(next);
   };
 
   /** Fire the pending volume change once, on release (pointer/key) or blur. */
@@ -358,6 +419,89 @@ export default function PlayerBar({
                 <button className="eq-reset" onClick={resetEq}>
                   Reset
                 </button>
+              </div>
+              <div className="eq-presets">
+                <label className="eq-preset">
+                  <span>Preset</span>
+                  <select
+                    value={presetValue}
+                    aria-label="Equalizer preset"
+                    onChange={(e) => onPickPreset(e.target.value)}
+                  >
+                    <option value="">Custom</option>
+                    <optgroup label="Presets">
+                      {BUILTIN_PRESETS.map((p) => (
+                        <option key={p.name} value={`builtin:${p.name}`}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    {customPresets.length > 0 && (
+                      <optgroup label="My presets">
+                        {customPresets.map((p) => (
+                          <option key={p.name} value={`custom:${p.name}`}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </label>
+                {saveOpen ? (
+                  <form className="eq-save" onSubmit={savePreset}>
+                    <input
+                      autoFocus
+                      className="eq-save-input"
+                      value={saveName}
+                      placeholder="Preset name…"
+                      aria-label="Preset name"
+                      onChange={(e) => setSaveName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setSaveOpen(false);
+                          setSaveName("");
+                        }
+                      }}
+                    />
+                    <button type="submit" className="eq-save-btn" disabled={!saveName.trim()}>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="eq-save-btn"
+                      onClick={() => {
+                        setSaveOpen(false);
+                        setSaveName("");
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div className="eq-save-row">
+                    <button
+                      type="button"
+                      className="eq-save-btn"
+                      onClick={() => {
+                        setSaveName(activeCustom ?? "");
+                        setSaveOpen(true);
+                      }}
+                    >
+                      Save as…
+                    </button>
+                    {activeCustom && (
+                      <button
+                        type="button"
+                        className="eq-delete"
+                        onClick={() => deleteCustomPreset(activeCustom)}
+                        aria-label={`Delete preset ${activeCustom}`}
+                        title="Delete preset"
+                      >
+                        <Trash size={14} aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="eq-bands">
                 {EQ_LABELS.map((label, i) => (

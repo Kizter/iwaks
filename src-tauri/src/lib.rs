@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use iwaks_core::track::{TagEdits, Track};
 use iwaks_library::db::Library;
+use iwaks_library::persist::EqPreset;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode};
@@ -128,6 +129,23 @@ fn set_online_cover(enabled: bool, state: State<'_, AppState>) -> Result<(), Str
     state.online_cover.store(enabled, Ordering::Relaxed);
     state.cover_memo.lock().expect("cover memo").clear();
     Ok(())
+}
+
+/// The user's saved equalizer presets (empty when none have been saved).
+#[tauri::command]
+fn get_eq_presets(state: State<'_, AppState>) -> Result<Vec<EqPreset>, String> {
+    open_lib(&state)?
+        .load_eq_presets()
+        .map_err(|e| e.to_string())
+}
+
+/// Replace the user's saved equalizer presets. Built-in templates are not
+/// stored; the frontend sends only the custom list.
+#[tauri::command]
+fn set_eq_presets(presets: Vec<EqPreset>, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .save_eq_presets(&presets)
+        .map_err(|e| e.to_string())
 }
 
 /// Clone of the live player handle, or `None` when playback is unavailable.
@@ -744,6 +762,8 @@ pub fn run() {
             set_sleep_timer,
             set_eq,
             set_replaygain,
+            get_eq_presets,
+            set_eq_presets,
             stop_playback,
             get_player_state,
             get_lyrics,
