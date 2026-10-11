@@ -47,7 +47,7 @@ expensive subsystems last.
       <!-- docs/issues/20-genre-decade-filters.md -->
 - [x] **21** Sort control (artist/album/title/added/duration)
       <!-- docs/issues/21-sort-control.md -->
-- [ ] **22** File logging + panic hook (needs `panic = "unwind"`)
+- [x] **22** File logging + panic hook (needs `panic = "unwind"`)
       <!-- docs/issues/22-file-logging-panic-hook.md -->
 - [ ] **23** Output device picker <!-- docs/issues/23-output-device-picker.md -->
 - [ ] **24** WASAPI exclusive-output toggle

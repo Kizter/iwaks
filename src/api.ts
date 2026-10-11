@@ -155,6 +155,11 @@ export function playerSetEq(preamp: number, gains: number[]): Promise<void> {
   return invoke<void>("set_eq", { preamp, eq: gains });
 }
 
+/** Path of this session's log file, or `null` when disk logging is off. */
+export function getLogPath(): Promise<string | null> {
+  return invoke<string | null>("log_path");
+}
+
 /** The user's saved equalizer presets (empty when none have been saved). */
 export function getEqPresets(): Promise<EqPreset[]> {
   return invoke<EqPreset[]>("get_eq_presets");

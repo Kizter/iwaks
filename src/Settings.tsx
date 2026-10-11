@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { DiscordLogo, Keyboard } from "@phosphor-icons/react";
-import { getOnlineCover, setOnlineCover } from "./api";
+import { DiscordLogo, Keyboard, NotePencil } from "@phosphor-icons/react";
+import { getLogPath, getOnlineCover, setOnlineCover } from "./api";
 import { friendlyError } from "./format";
 
 /** Every global shortcut, so the keys are discoverable without a manual. */
@@ -21,6 +21,7 @@ export default function Settings() {
   const [onlineCover, setOnline] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logFile, setLogFile] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -32,6 +33,18 @@ export default function Settings() {
         // Leave the switch off; the flag defaults to off on the Rust side too.
         if (alive) setOnline(false);
       });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getLogPath()
+      .then((p) => {
+        if (alive) setLogFile(p);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -90,6 +103,24 @@ export default function Settings() {
           </div>
 
           {error && <p className="set-error">{error}</p>}
+        </section>
+
+        <section className="set-group" aria-labelledby="set-log">
+          <h2 className="set-group-title" id="set-log">
+            <NotePencil size={18} aria-hidden="true" />
+            Diagnostics
+          </h2>
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title">Log file</span>
+              <span className="set-note">
+                Iwaks records playback, cover-art and presence events in a daily
+                log, and writes down the message and location if it ever panics.
+                Attach this file to a bug report.
+              </span>
+            </div>
+            <code className="set-log-path">{logFile ?? "Not available"}</code>
+          </div>
         </section>
 
         <section className="set-group" aria-labelledby="set-keys">

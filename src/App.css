@@ -466,6 +466,20 @@ body {
   cursor: pointer;
 }
 
+.set-log-path {
+  flex: none;
+  max-width: 340px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: var(--font-xs);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 /* ---------- keyboard shortcuts list ---------- */
 
 .set-keys {

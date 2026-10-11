@@ -139,6 +139,13 @@ fn get_eq_presets(state: State<'_, AppState>) -> Result<Vec<EqPreset>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Path of the log file this session writes to (`null` when logging to disk
+/// could not be opened); shown in Settings so a bug report can point at it.
+#[tauri::command]
+fn log_path() -> Option<String> {
+    iwaks_log::path().map(|p| p.to_string_lossy().to_string())
+}
+
 /// Replace the user's saved equalizer presets. Built-in templates are not
 /// stored; the frontend sends only the custom list.
 #[tauri::command]
@@ -689,6 +696,26 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Log file + panic hook first: everything below is exactly the kind
+            // of startup that goes wrong silently otherwise (issue #22).
+            match app.path().app_log_dir() {
+                Ok(dir) => match iwaks_log::init(&dir) {
+                    Some(path) => iwaks_log::line(
+                        iwaks_log::Level::Info,
+                        &format!("iwaks starting, logging to {}", path.display()),
+                    ),
+                    None => iwaks_log::line(
+                        iwaks_log::Level::Warn,
+                        &format!("could not open a log file in {}", dir.display()),
+                    ),
+                },
+                Err(e) => iwaks_log::line(
+                    iwaks_log::Level::Warn,
+                    &format!("no app log directory ({e})"),
+                ),
+            }
+            iwaks_log::install_panic_hook();
+
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("iwaks.db");
@@ -732,7 +759,7 @@ pub fn run() {
             ) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    eprintln!("player unavailable: {e}");
+                    iwaks_log::line(iwaks_log::Level::Warn, &format!("player unavailable: {e}"));
                     let _ = app.emit("player-error", PLAYER_UNAVAILABLE);
                     None
                 }
@@ -810,6 +837,7 @@ pub fn run() {
             set_replaygain,
             get_eq_presets,
             set_eq_presets,
+            log_path,
             stop_playback,
             get_player_state,
             get_lyrics,

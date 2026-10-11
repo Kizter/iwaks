@@ -1567,6 +1567,7 @@ dependencies = [
  "iwaks-core",
  "iwaks-cover",
  "iwaks-library",
+ "iwaks-log",
  "iwaks-player",
  "iwaks-presence",
  "iwaks-tags",
@@ -1588,6 +1589,7 @@ dependencies = [
 name = "iwaks-cover"
 version = "0.1.0"
 dependencies = [
+ "iwaks-log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -1608,10 +1610,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iwaks-log"
+version = "0.1.0"
+
+[[package]]
 name = "iwaks-player"
 version = "0.1.0"
 dependencies = [
  "iwaks-core",
+ "iwaks-log",
  "libloading 0.8.9",
  "serde",
 ]
@@ -1620,6 +1627,7 @@ dependencies = [
 name = "iwaks-presence"
 version = "0.1.0"
 dependencies = [
+ "iwaks-log",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/core", "crates/library", "crates/tags", "crates/player", "crates/presence", "crates/cover"]
+members = ["src-tauri", "crates/core", "crates/library", "crates/log", "crates/tags", "crates/player", "crates/presence", "crates/cover"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ license = "MIT"
 iwaks-core = { path = "crates/core" }
 iwaks-cover = { path = "crates/cover" }
 iwaks-library = { path = "crates/library" }
+iwaks-log = { path = "crates/log" }
 iwaks-presence = { path = "crates/presence" }
 iwaks-tags = { path = "crates/tags" }
 serde = { version = "1", features = ["derive"] }
@@ -23,9 +24,12 @@ base64 = "0.22"
 libloading = "0.8"
 
 # Shared release profile (was previously in src-tauri/Cargo.toml).
+# `panic` stays `unwind` (the default, stated here so it is not "optimised"
+# later): the panic hook in iwaks-log records the message and location before
+# the process dies, which `abort` would skip past.
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+panic = "unwind"
 strip = true

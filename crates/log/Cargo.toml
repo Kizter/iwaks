@@ -1,0 +1,10 @@
+[package]
+name = "iwaks-log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Append-only file log and panic hook for Iwaks"
+
+# No dependencies: the log is a line of text appended to one file per day, and
+# the timestamp is computed here rather than pulled in from a date-time crate.
+[dependencies]

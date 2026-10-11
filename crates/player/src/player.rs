@@ -789,7 +789,7 @@ impl Player {
             match event {
                 Some(MpvEvent::LogMessage(text)) => {
                     // Only produced when `IWAKS_MPV_LOG` is set at startup.
-                    eprintln!("[mpv] {text}");
+                    iwaks_log::line(iwaks_log::Level::Debug, &format!("mpv: {text}"));
                 }
                 Some(MpvEvent::EndFile(reason)) => player.on_end_file(reason),
                 Some(MpvEvent::FileLoaded) => player.emit(),

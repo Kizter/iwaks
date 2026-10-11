@@ -6,6 +6,7 @@ license.workspace = true
 description = "Discord Rich Presence — custom RPC protocol over the Discord local pipe (Windows)"
 
 [dependencies]
+iwaks-log.workspace = true
 serde.workspace = true
 serde_json = "1"
 thiserror.workspace = true

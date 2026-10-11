@@ -119,7 +119,10 @@ fn run_with_transport(
     assets: AssetKeys,
 ) {
     if cfg!(debug_assertions) {
-        eprintln!("[debug] discord presence: app id = {app_id}");
+        iwaks_log::line(
+            iwaks_log::Level::Debug,
+            &format!("discord presence: app id = {app_id}"),
+        );
     }
     let pid = std::process::id();
     let mut client = Client::new(&app_id, pid);
@@ -142,8 +145,9 @@ fn run_with_transport(
                         Ok(()) => Event::Opened,
                         Err(cause) => {
                             if cfg!(debug_assertions) {
-                                eprintln!(
-                                    "[debug] discord presence: Discord not reachable — {cause}"
+                                iwaks_log::line(
+                                    iwaks_log::Level::Debug,
+                                    &format!("discord presence: Discord not reachable — {cause}"),
                                 );
                             }
                             Event::ConnectFailed
@@ -154,7 +158,10 @@ fn run_with_transport(
                 Effect::Write(bytes) => {
                     if let Err(cause) = transport.write(&bytes) {
                         if cfg!(debug_assertions) {
-                            eprintln!("[debug] discord presence: write failed — {cause}");
+                            iwaks_log::line(
+                                iwaks_log::Level::Debug,
+                                &format!("discord presence: write failed — {cause}"),
+                            );
                         }
                         // Broken pipe — let the client schedule a reconnect.
                         effects.extend(client.on_event(Event::Disconnected));
@@ -170,9 +177,12 @@ fn run_with_transport(
             match transport.try_read_frame() {
                 Ok(Some(frame)) => {
                     if cfg!(debug_assertions) && frame.opcode == OP_CLOSE {
-                        eprintln!(
-                            "[debug] discord presence: Discord closed the connection: {}",
-                            frame.payload
+                        iwaks_log::line(
+                            iwaks_log::Level::Debug,
+                            &format!(
+                                "discord presence: Discord closed the connection: {}",
+                                frame.payload
+                            ),
                         );
                     }
                     effects.extend(client.on_event(Event::Frame(frame)));
@@ -180,7 +190,10 @@ fn run_with_transport(
                 Ok(None) => {}
                 Err(cause) => {
                     if cfg!(debug_assertions) {
-                        eprintln!("[debug] discord presence: read error — {cause}");
+                        iwaks_log::line(
+                            iwaks_log::Level::Debug,
+                            &format!("discord presence: read error — {cause}"),
+                        );
                     }
                     effects.extend(client.on_event(Event::Disconnected));
                 }
@@ -241,7 +254,10 @@ fn log_phase_change(before: Phase, after: Phase) {
         (Phase::Ready, Phase::Disconnected) => "RPC connection lost — reconnecting".to_string(),
         _ => return,
     };
-    eprintln!("[debug] discord presence: {message}");
+    iwaks_log::line(
+        iwaks_log::Level::Debug,
+        &format!("discord presence: {message}"),
+    );
 }
 
 /// Content identity: position and timestamps are deliberately excluded so

@@ -23,6 +23,7 @@ tauri-plugin-dialog = "2"
 iwaks-core = { path = "../crates/core" }
 iwaks-cover = { path = "../crates/cover" }
 iwaks-library = { path = "../crates/library" }
+iwaks-log = { path = "../crates/log" }
 iwaks-player = { path = "../crates/player" }
 iwaks-presence.workspace = true
 iwaks-tags.workspace = true

@@ -139,7 +139,10 @@ pub fn resolve(
             // so the next tick of this album asks again. Logged once here rather
             // than in the crate — a library returns the error, the app reports it.
             if cfg!(debug_assertions) {
-                eprintln!("[debug] cover: lookup not cached ({e})");
+                iwaks_log::line(
+                    iwaks_log::Level::Debug,
+                    &format!("cover: lookup not cached ({e})"),
+                );
             }
             None
         }
