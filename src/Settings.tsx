@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
-import { DiscordLogo } from "@phosphor-icons/react";
+import { DiscordLogo, Keyboard } from "@phosphor-icons/react";
 import { getOnlineCover, setOnlineCover } from "./api";
 import { friendlyError } from "./format";
+
+/** Every global shortcut, so the keys are discoverable without a manual. */
+const SHORTCUTS: Array<{ keys: string; what: string }> = [
+  { keys: "Space", what: "Play / pause" },
+  { keys: "← / →", what: "Seek 10 seconds back / forward" },
+  { keys: "Shift + ← / →", what: "Previous / next track" },
+  { keys: "N", what: "Open Now Playing" },
+  { keys: "Escape", what: "Close Now Playing, pickers, and modals" },
+  { keys: "/", what: "Focus the search box" },
+  { keys: "Alt + ↑ / ↓", what: "Move the queue item up / down" },
+];
 
 /** Settings surface: one row per persisted flag, nothing that scans or plays. */
 export default function Settings() {
@@ -79,6 +90,25 @@ export default function Settings() {
           </div>
 
           {error && <p className="set-error">{error}</p>}
+        </section>
+
+        <section className="set-group" aria-labelledby="set-keys">
+          <h2 className="set-group-title" id="set-keys">
+            <Keyboard size={18} aria-hidden="true" />
+            Keyboard shortcuts
+          </h2>
+          <dl className="set-keys">
+            {SHORTCUTS.map((s) => (
+              <div className="set-key-row" key={s.keys}>
+                <dt>
+                  {s.keys.split(" / ").map((k) => (
+                    <kbd key={k}>{k}</kbd>
+                  ))}
+                </dt>
+                <dd>{s.what}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
       </div>
     </>

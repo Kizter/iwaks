@@ -18,6 +18,9 @@ import {
   pickM3uFile,
   pickM3uSave,
   playTracks,
+  playerNext,
+  playerPrev,
+  playerSeekRelative,
   playerTogglePlay,
   removeFromPlaylist,
   renamePlaylist,
@@ -53,6 +56,9 @@ import type { Playlist, PlayerState, ScanProgress, Track } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
 
 const ROW_HEIGHT = 56;
+
+/** Seconds moved by the ← / → seek shortcuts. */
+const SEEK_STEP = 10;
 
 // ---- library navigation views (grouped browse) ----
 
@@ -1001,10 +1007,15 @@ function App() {
   const [scanProg, setScanProg] = useState<ScanProgress | null>(null);
   const [scanNote, setScanNote] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  // Success feedback is transient and styled apart from an error banner, which
+  // stays until dismissed (issue #16).
+  const [notice, setNotice] = useState<string | null>(null);
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   // Bumped after a scan/add finishes so the track list re-fetches.
   const [refreshKey, setRefreshKey] = useState(0);
+  // Playlist awaiting delete confirmation in the app's own modal.
+  const [deleteTarget, setDeleteTarget] = useState<Playlist | null>(null);
   // Active library view: song list, browse grid, or a specific group detail.
   const [view, setView] = useState<View>({ kind: "songs" });
   // The album-art-first Now Playing surface (issue #10). Kept separate from
@@ -1026,6 +1037,13 @@ function App() {
   const [plDraft, setPlDraft] = useState("");
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
+
+  // Success notices fade on their own; error banners never do.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   useEffect(() => {
     let disposed = false;
@@ -1124,6 +1142,40 @@ function App() {
       if (e.code === "Space") {
         e.preventDefault();
         void playerTogglePlay();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Transport shortcuts (issue #17): ←/→ seek ±10 s, Shift+←/→ jump tracks, `/`
+  // focuses the search box. Skipped while typing so a stray key never hijacks a
+  // text field, and never with Ctrl/Alt held — those stay with the queue reorder.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      switch (e.code) {
+        case "ArrowLeft":
+          e.preventDefault();
+          void (e.shiftKey ? playerPrev() : playerSeekRelative(-SEEK_STEP));
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          void (e.shiftKey ? playerNext() : playerSeekRelative(SEEK_STEP));
+          break;
+        case "Slash": {
+          if (e.shiftKey) return;
+          e.preventDefault();
+          // Hidden on views that do not filter, so a missing input is the no-op.
+          const input = document.querySelector<HTMLInputElement>(".search input");
+          input?.focus();
+          input?.select();
+          break;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1276,7 +1328,7 @@ function App() {
     if (!path) return;
     try {
       const id = await importM3u(path);
-      setBanner("Playlist imported");
+      setNotice("Playlist imported");
       await refreshPlaylists();
       setView({ kind: "playlist", id });
     } catch (e) {
@@ -1291,25 +1343,31 @@ function App() {
     if (!picked) return;
     try {
       await exportM3u(view.id, picked);
-      setBanner("Playlist exported");
+      setNotice("Playlist exported");
     } catch (e) {
       setBanner(`Export failed — ${friendlyError(e)}`);
     }
   }, [view, playlists]);
 
-  const onDelete = useCallback(async () => {
+  const onDelete = useCallback(() => {
+    // Deleting a playlist is destructive, so it asks in the app's own modal
+    // instead of a native window.confirm (issue #16).
     if (view.kind !== "playlist") return;
-    const current = (playlists ?? []).find((p) => p.id === view.id);
-    const ok = window.confirm(`Delete playlist “${current?.name ?? "this playlist"}”?`);
-    if (!ok) return;
+    setDeleteTarget((playlists ?? []).find((p) => p.id === view.id) ?? null);
+  }, [view, playlists]);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
     try {
-      await deletePlaylist(view.id);
+      await deletePlaylist(target.id);
       setView({ kind: "playlists" });
       await refreshPlaylists();
     } catch (e) {
       setBanner(`Delete failed — ${friendlyError(e)}`);
     }
-  }, [view, playlists, refreshPlaylists]);
+  }, [deleteTarget, refreshPlaylists]);
 
   const onRemoveFromDetail = useCallback(
     async (track: Track) => {
@@ -1338,7 +1396,7 @@ function App() {
       try {
         const id = await saveQueueAsPlaylist(name);
         setSaveQueueOpen(false);
-        setBanner("Queue saved as playlist");
+        setNotice("Queue saved as playlist");
         await refreshPlaylists();
         setView({ kind: "playlist", id });
       } catch (e) {
@@ -1354,7 +1412,7 @@ function App() {
       if (!t) return;
       try {
         await addToPlaylist(playlistId, t.id);
-        setBanner(`Added “${t.title}” to playlist`);
+        setNotice(`Added “${t.title}” to playlist`);
         setAddTarget(null);
         await refreshPlaylists();
       } catch (e) {
@@ -1371,7 +1429,7 @@ function App() {
       try {
         const id = await createPlaylist(name);
         await addToPlaylist(id, t.id);
-        setBanner(`Created playlist with “${t.title}”`);
+        setNotice(`Created playlist with “${t.title}”`);
         setAddTarget(null);
         await refreshPlaylists();
         setView({ kind: "playlist", id });
@@ -1384,6 +1442,7 @@ function App() {
 
   const onScan = useCallback(async () => {
     setBanner(null);
+    setNotice(null);
     setScanNote(null);
     const folder = await pickFolder();
     if (!folder) return;
@@ -1399,6 +1458,7 @@ function App() {
 
   const onAddFiles = useCallback(async () => {
     setBanner(null);
+    setNotice(null);
     setScanNote(null);
     const files = await pickFiles();
     if (!files || files.length === 0) return;
@@ -1497,6 +1557,10 @@ function App() {
       ? (filteredPlTracks?.length ?? 0) === 0
       : !isQueue && !isPlaylists && (isGrid ? groups.length === 0 : showing.length === 0));
   const activeTracks = filteredPlTracks ?? groupTracks ?? showing;
+  // The query only filters views that honour it: the queue and the playlists
+  // grid ignore it, so the box is hidden there instead of typing into nothing
+  // (issue #16).
+  const searchApplies = !isQueue && !isPlaylists;
 
   const onPlay = useCallback(
     (index: number) => {
@@ -1615,16 +1679,18 @@ function App() {
           )}
         </div>
         <div className="toolbar-actions">
-          <label className="search">
-            <span className="visually-hidden">Search your library</span>
-            <MagnifyingGlass className="search-ico" size={16} aria-hidden="true" />
-            <input
-              type="search"
-              placeholder="Search songs, artists, albums…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
+          {searchApplies && (
+            <label className="search">
+              <span className="visually-hidden">Search your library</span>
+              <MagnifyingGlass className="search-ico" size={16} aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Search songs, artists, albums…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          )}
           <button
             className="btn-ghost"
             onClick={() => void onAddFiles()}
@@ -1700,7 +1766,6 @@ function App() {
                 <button
                   className="btn-ghost"
                   onClick={() => setSaveQueueOpen(true)}
-                  disabled={scanning || adding}
                 >
                   Save as playlist
                 </button>
@@ -1731,7 +1796,7 @@ function App() {
         </p>
       )}
       {playerError && (
-        <div className="banner" role="alert">
+        <div className="banner error" role="alert">
           <span>{playerError}</span>
           <button className="btn-ghost" onClick={() => setPlayerError(null)}>
             Dismiss
@@ -1739,11 +1804,16 @@ function App() {
         </div>
       )}
       {banner && (
-        <div className="banner" role="alert">
+        <div className="banner error" role="alert">
           <span>{banner}</span>
           <button className="btn-ghost" onClick={() => setBanner(null)}>
             Dismiss
           </button>
+        </div>
+      )}
+      {notice && (
+        <div className="banner notice" role="status">
+          <span>{notice}</span>
         </div>
       )}
 
@@ -1858,6 +1928,7 @@ function App() {
             tracks={filteredPlTracks}
             playingPath={playerState?.current?.path ?? null}
             onPlay={onPlay}
+            onEdit={(t) => setEditTarget(t)}
             onRemove={(t) => void onRemoveFromDetail(t)}
           />
         ) : gridKind === "folders" && folderTree ? (
@@ -1989,6 +2060,37 @@ function App() {
                 Create &amp; add
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="picker-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div
+            className="picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Delete playlist"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="picker-title">Delete “{deleteTarget.name}”?</p>
+            <p className="picker-empty">
+              {deleteTarget.trackCount === 1
+                ? "Its 1 track stays in your library — only the playlist entry is removed."
+                : `Its ${deleteTarget.trackCount.toLocaleString()} tracks stay in your library — only the playlist entries are removed.`}
+            </p>
+            <div className="picker-new">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button type="button" className="btn-danger" onClick={() => void confirmDelete()}>
+                Delete playlist
+              </button>
+            </div>
           </div>
         </div>
       )}

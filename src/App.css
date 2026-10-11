@@ -427,6 +427,60 @@ body {
   font-size: var(--font-base);
 }
 
+/* Failure: warm red wash. Stays until dismissed. */
+.banner.error {
+  background: var(--danger-a09);
+  color: var(--danger);
+}
+
+/* Success: the calm tone, auto-dismissed (issue #16). */
+.banner.notice {
+  background: var(--mint);
+  color: var(--ink-strong);
+}
+
+/* ---------- keyboard shortcuts list ---------- */
+
+.set-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.set-key-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.set-key-row dt {
+  flex: none;
+  min-width: 132px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.set-key-row dd {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* ---------- track list ---------- */
 
 .track-head {
