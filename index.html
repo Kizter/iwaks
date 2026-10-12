@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Iwaks</title>
+    <script>
+      // Pre-paint theme (issue #25). Applies the OS preference before the
+      // first frame so a dark desktop never flashes parchment. The stored
+      // choice arrives over IPC a moment later and overrides this — the only
+      // case that can still flash is a user who pinned dark on a light OS.
+      (function () {
+        try {
+          var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+        }
+      })();
+    </script>
   </head>
 
   <body>

@@ -1,45 +1,4 @@
 :root {
-  /* Iwaks — palet Warm Pastel-Muted (Desaturated) + sentuhan monokrom:
-     parchment hangat + dusty rosewood (nostalgic & bittersweet). Light-only. */
-  --bg: #f3ede4; /* warm greige parchment */
-  --surface: #faf5ed; /* warm paper (cards, popovers, inputs) */
-  --sidebar: #ece5d9; /* deeper warm panel */
-  --ink: #8f5a66; /* dusty rosewood — aksen utama (putih 5.48:1, di bg 4.71:1) */
-  --ink-hover: #7a4955; /* hover tombol (7.12:1) */
-  --ink-soft: #7f5865; /* ikon sekunder (bg 5.18:1, panel 4.81:1, mint 4.95:1) */
-  --ink-strong: #6e3f4b; /* teks/ikon pill aktif */
-  --mint: #f1e7e0; /* hover lembut / cover fallback */
-  --ice: #e6d9d3; /* pill aktif / is-playing / field */
-  --text: #3d352e; /* warm charcoal (sebagian besar heading) */
-  /* >= 4.5:1 on --bg (5.01:1) and on hover --mint (4.57:1) */
-  --text-dim: #6f6355;
-  --line: #ddd4c6;
-  --danger: #9a3e35;
-  --danger-a09: rgba(154, 62, 53, 0.09);
-
-  /* alpha ramp aksen — menggantikan seluruh rgba biru hardcoded */
-  --ink-a07: color-mix(in srgb, var(--ink) 7%, transparent);
-  --ink-a09: color-mix(in srgb, var(--ink) 9%, transparent);
-  --ink-a10: color-mix(in srgb, var(--ink) 10%, transparent);
-  --ink-a12: color-mix(in srgb, var(--ink) 12%, transparent);
-  --ink-a15: color-mix(in srgb, var(--ink) 15%, transparent);
-  --ink-a16: color-mix(in srgb, var(--ink) 16%, transparent);
-  --ink-a18: color-mix(in srgb, var(--ink) 18%, transparent);
-  --ink-a20: color-mix(in srgb, var(--ink) 20%, transparent);
-  --ink-a35: color-mix(in srgb, var(--ink) 35%, transparent);
-  --ink-a45: color-mix(in srgb, var(--ink) 45%, transparent);
-
-  /* elevation warm — menggantikan rgba navy biru */
-  --shadow-top: rgba(66, 55, 48, 0.05);
-  --shadow-float: rgba(58, 46, 40, 0.22);
-  --scrim: rgba(58, 46, 40, 0.35);
-  --text-a40: rgba(111, 99, 85, 0.4);
-
-  /* skeleton shimmer — warm greige */
-  --skeleton: #e9dfd3;
-  --sk-base: var(--skeleton);
-  --sk-shine: #f5eee5;
-
   /* Type scale (issue #11). `16px` below is the rem baseline, not a step.
      Every functional size is built from these — no hardcoded font sizes. */
   --font-xs: 0.72rem; /* 11.52px — labels, badges */
@@ -72,6 +31,96 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Palet ----
+   Satu blok per tema; `data-theme` di <html> yang memilih (lihat src/theme.ts
+   dan skrip pre-paint di index.html). Tidak ada warna literal di luar blok ini:
+   aturan hanya memakai var(). */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Iwaks — palet Warm Pastel-Muted (Desaturated) + sentuhan monokrom:
+     parchment hangat + dusty rosewood (nostalgic & bittersweet). */
+  --bg: #f3ede4; /* warm greige parchment */
+  --surface: #faf5ed; /* warm paper (cards, popovers, inputs) */
+  --sidebar: #ece5d9; /* deeper warm panel */
+  --ink: #8f5a66; /* dusty rosewood — aksen utama (putih 5.48:1, di bg 4.71:1) */
+  --ink-hover: #7a4955; /* hover tombol (7.12:1) */
+  --ink-soft: #7f5865; /* ikon sekunder (bg 5.18:1, panel 4.81:1, mint 4.95:1) */
+  --ink-strong: #6e3f4b; /* teks/ikon pill aktif */
+  --mint: #f1e7e0; /* hover lembut / cover fallback */
+  --ice: #e6d9d3; /* pill aktif / is-playing / field */
+  --text: #3d352e; /* warm charcoal (sebagian besar heading) */
+  /* >= 4.5:1 on --bg (5.01:1) and on hover --mint (4.57:1) */
+  --text-dim: #6f6355;
+  --line: #ddd4c6;
+  --danger: #9a3e35;
+  --danger-a09: color-mix(in srgb, var(--danger) 9%, transparent);
+  /* teks di atas latar aksen (tombol primary, badge format DSD, play) */
+  --on-ink: #ffffff;
+  /* placeholder artwork playlist */
+  --art-grad-from: rgba(138, 85, 98, 0.2);
+  --art-grad-to: rgba(196, 148, 108, 0.2);
+
+  /* alpha ramp aksen — menggantikan seluruh rgba biru hardcoded */
+  --ink-a07: color-mix(in srgb, var(--ink) 7%, transparent);
+  --ink-a09: color-mix(in srgb, var(--ink) 9%, transparent);
+  --ink-a10: color-mix(in srgb, var(--ink) 10%, transparent);
+  --ink-a12: color-mix(in srgb, var(--ink) 12%, transparent);
+  --ink-a15: color-mix(in srgb, var(--ink) 15%, transparent);
+  --ink-a16: color-mix(in srgb, var(--ink) 16%, transparent);
+  --ink-a18: color-mix(in srgb, var(--ink) 18%, transparent);
+  --ink-a20: color-mix(in srgb, var(--ink) 20%, transparent);
+  --ink-a35: color-mix(in srgb, var(--ink) 35%, transparent);
+  --ink-a45: color-mix(in srgb, var(--ink) 45%, transparent);
+
+  /* elevation warm — menggantikan rgba navy biru */
+  --shadow-top: rgba(66, 55, 48, 0.05);
+  --shadow-float: rgba(58, 46, 40, 0.22);
+  --scrim: rgba(58, 46, 40, 0.35);
+  --text-a40: color-mix(in srgb, var(--text) 40%, transparent);
+
+  /* skeleton shimmer — warm greige */
+  --skeleton: #e9dfd3;
+  --sk-base: var(--skeleton);
+  --sk-shine: #f5eee5;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Rosewood yang sama, dibalik: tanah hangat-gelap, aksen jadi rosewood
+     muda. Semua rasio di bawah diukur terhadap latar gelap (lihat
+     docs/issues/25-dark-mode.md). */
+  --bg: #1c1815; /* warm near-black (--text 14.02:1) */
+  --surface: #241f1b; /* kartu/popover/input */
+  --sidebar: #14110f; /* panel lebih gelap dari --bg */
+  --ink: #e3aeb9; /* aksen utama (9.25:1 di bg) */
+  --ink-hover: #f0cad2; /* hover tombol */
+  --ink-soft: #cfa3ac; /* ikon sekunder */
+  --ink-strong: #f0d3d8; /* teks/ikon pill aktif (10.14:1 di --ice) */
+  --mint: #2a2320; /* hover lembut / cover fallback */
+  --ice: #322926; /* pill aktif / is-playing / field */
+  --text: #ece4dc; /* teks utama (14.02:1 di bg) */
+  --text-dim: #b0a294; /* teks sekunder (7.09:1 di bg) */
+  --line: #3a322d;
+  --danger: #ef8b80; /* (5.98:1 di --danger wash) */
+  --danger-a09: color-mix(in srgb, var(--danger) 12%, transparent);
+  /* aksen gelap jadi terang → teks di atasnya harus gelap */
+  --on-ink: #1c1815;
+  --art-grad-from: rgba(196, 120, 138, 0.22);
+  --art-grad-to: rgba(214, 160, 110, 0.22);
+
+  --shadow-top: rgba(0, 0, 0, 0.35);
+  --shadow-float: rgba(0, 0, 0, 0.55);
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  --skeleton: #262019;
+  --sk-base: var(--skeleton);
+  --sk-shine: #342b24;
 }
 
 * {
@@ -339,7 +388,7 @@ body {
   border: none;
   border-radius: var(--radius-md);
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -464,6 +513,43 @@ body {
   color: var(--text);
   background: var(--surface);
   cursor: pointer;
+}
+
+/* ---------- segmented control (theme picker) ---------- */
+
+.segmented {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--mint);
+}
+
+.segmented-btn {
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.segmented-btn:hover:not(:disabled):not(.on) {
+  color: var(--text);
+}
+
+.segmented-btn.on {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.segmented-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .set-select {
@@ -704,7 +790,7 @@ kbd {
 .cover-dff,
 .cover-wv {
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 
 .track-main {
@@ -958,7 +1044,7 @@ kbd {
   width: 40px;
   height: 40px;
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 
 .icon-btn.play-main:hover:not(:disabled) {
@@ -1675,7 +1761,7 @@ input[type="range"].eq-slider::-moz-range-thumb {
   width: 40px;
   height: 40px;
   background: var(--ink);
-  color: #fff;
+  color: var(--on-ink);
 }
 .mp-play:hover:not(:disabled) {
   background: var(--ink-hover);
@@ -1954,7 +2040,7 @@ input[type="range"]:disabled {
   width: 100%;
   aspect-ratio: 1;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, rgba(138, 85, 98, 0.2), rgba(196, 148, 108, 0.2));
+  background: linear-gradient(135deg, var(--art-grad-from), var(--art-grad-to));
   color: var(--ink);
 }
 

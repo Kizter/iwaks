@@ -160,6 +160,16 @@ export function getLogPath(): Promise<string | null> {
   return invoke<string | null>("log_path");
 }
 
+/** Stored UI theme: `system` | `light` | `dark` (issue #25). */
+export function getTheme(): Promise<string> {
+  return invoke<string>("get_theme");
+}
+
+/** Remember the UI theme choice. */
+export function setTheme(mode: string): Promise<void> {
+  return invoke<void>("set_theme", { mode });
+}
+
 /** Mirrors iwaks_player::AudioDevice (serde camelCase). */
 export interface AudioDevice {
   /** mpv identifier; empty string is the system default. */

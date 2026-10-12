@@ -115,6 +115,8 @@ fn open_lib(state: &AppState) -> Result<Library, String> {
 /// other entry in the `settings` table.
 pub const SETTING_AUDIO_DEVICE: &str = "audio.device";
 pub const SETTING_AUDIO_EXCLUSIVE: &str = "audio.exclusive";
+/// UI theme: `system`, `light` or `dark` (issue #25).
+pub const SETTING_THEME: &str = "ui.theme";
 
 fn read_setting(db_path: &Path, key: &str) -> Option<String> {
     Library::open(&db_path.to_string_lossy())
@@ -161,6 +163,20 @@ fn set_online_cover(enabled: bool, state: State<'_, AppState>) -> Result<(), Str
 fn get_eq_presets(state: State<'_, AppState>) -> Result<Vec<EqPreset>, String> {
     open_lib(&state)?
         .load_eq_presets()
+        .map_err(|e| e.to_string())
+}
+
+/// Stored UI theme (`system` | `light` | `dark`); `system` when never set.
+#[tauri::command]
+fn get_theme(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(read_setting(&state.db_path, SETTING_THEME).unwrap_or_else(|| "system".to_string()))
+}
+
+/// Remember the UI theme choice.
+#[tauri::command]
+fn set_theme(mode: String, state: State<'_, AppState>) -> Result<(), String> {
+    open_lib(&state)?
+        .set_setting(SETTING_THEME, &mode)
         .map_err(|e| e.to_string())
 }
 
@@ -909,6 +925,8 @@ pub fn run() {
             get_eq_presets,
             set_eq_presets,
             log_path,
+            get_theme,
+            set_theme,
             list_audio_devices,
             set_audio_device,
             get_audio_device,

@@ -1,17 +1,26 @@
-import { useEffect, useState } from "react";
-import { DiscordLogo, Keyboard, NotePencil, SpeakerHigh } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
+import { DiscordLogo, Keyboard, NotePencil, PaintBrushBroad, SpeakerHigh } from "@phosphor-icons/react";
 import {
   getAudioDevice,
   getAudioExclusive,
   getLogPath,
   getOnlineCover,
+  getTheme,
   listAudioDevices,
   setAudioDevice,
   setAudioExclusive,
   setOnlineCover,
+  setTheme,
   type AudioDevice,
 } from "./api";
 import { friendlyError } from "./format";
+import {
+  applyTheme,
+  isThemeMode,
+  THEME_MODES,
+  watchSystemTheme,
+  type ThemeMode,
+} from "./theme";
 
 /** Every global shortcut, so the keys are discoverable without a manual. */
 const SHORTCUTS: Array<{ keys: string; what: string }> = [
@@ -38,6 +47,11 @@ export default function Settings() {
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [device, setDevice] = useState<string | null>(null);
   const [exclusive, setExclusive] = useState<boolean | null>(null);
+  // Appearance (issue #25). `null` until the stored mode arrives.
+  const [theme, setThemeMode] = useState<ThemeMode | null>(null);
+  // Unsubscribe from the OS theme watcher while this page is mounted.
+  const unwatchRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => unwatchRef.current?.(), []);
 
   useEffect(() => {
     let alive = true;
@@ -79,6 +93,37 @@ export default function Settings() {
       alive = false;
     };
   }, []);
+
+  // Appearance (issue #25): the App already applied the stored mode, so this
+  // only reflects it in the control.
+  useEffect(() => {
+    let alive = true;
+    getTheme()
+      .then((mode) => {
+        if (alive) setThemeMode(isThemeMode(mode) ? mode : "system");
+      })
+      .catch(() => {
+        if (alive) setThemeMode("system");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const pickTheme = (mode: ThemeMode) => {
+    const previous = theme;
+    setThemeMode(mode);
+    applyTheme(mode);
+    // A pinned theme stops following the OS; `system` starts following again.
+    unwatchRef.current?.();
+    unwatchRef.current =
+      mode === "system" ? watchSystemTheme(() => applyTheme("system")) : null;
+    void setTheme(mode).catch((e: unknown) => {
+      setThemeMode(previous);
+      if (previous) applyTheme(previous);
+      setError(`Couldn't save that setting — ${friendlyError(e)}`);
+    });
+  };
 
   // Enumerated on demand: mpv has no change event we consume, and opening the
   // picker is the moment a stale list would actually be noticed.
@@ -161,6 +206,38 @@ export default function Settings() {
           </div>
 
           {error && <p className="set-error">{error}</p>}
+        </section>
+
+        <section className="set-group" aria-labelledby="set-theme">
+          <h2 className="set-group-title" id="set-theme">
+            <PaintBrushBroad size={18} aria-hidden="true" />
+            Appearance
+          </h2>
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title" id="set-theme-label">
+                Theme
+              </span>
+              <span className="set-note">
+                System follows your desktop&apos;s light/dark setting, even while
+                Iwaks is open.
+              </span>
+            </div>
+            <div className="segmented" role="group" aria-labelledby="set-theme-label">
+              {THEME_MODES.map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  className={`segmented-btn${theme === m.value ? " on" : ""}`}
+                  aria-pressed={theme === m.value}
+                  disabled={theme === null}
+                  onClick={() => pickTheme(m.value)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className="set-group" aria-labelledby="set-audio">
