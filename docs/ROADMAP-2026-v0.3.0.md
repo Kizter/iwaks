@@ -56,7 +56,8 @@ expensive subsystems last.
 - [x] **26** Equalizer preset templates + save custom setups (shipped ahead of
       this batch; GitHub `#14` is the v0.2.0 meta issue)
       <!-- docs/issues/26-equalizer-presets.md -->
-- [ ] **27** Crossfade <!-- docs/issues/27-crossfade.md -->
+- [ ] **27** Crossfade — stages 1–3 landed (engine, prefetch, ramp); stage 4
+      (settings + UI) remains <!-- docs/issues/27-crossfade.md -->
 
 ## Issue index
 

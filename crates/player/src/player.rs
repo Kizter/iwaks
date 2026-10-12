@@ -26,7 +26,7 @@
 //! Tests run headless (`ao=null`); when no libmpv DLL is present they skip.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{JoinHandle, ThreadId};
@@ -45,6 +45,10 @@ use crate::queue::{Queue, RepeatMode};
 const WAIT_SLICE: f64 = 0.1;
 /// Minimum interval between state-refresh ticks (the pump's ~10 Hz clock).
 const TICK_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Pump slice while a crossfade ramps: finer than [WAIT_SLICE] so the volume
+/// steps are ~50 ms and not audible as a staircase (issue #27).
+const FADE_SLICE: f64 = 0.02;
 
 /// Playback behaviour knobs applied at startup.
 #[derive(Debug, Clone, Default)]
@@ -111,6 +115,64 @@ impl Crossfade {
         }
         Some(self.seconds.max(MIN_CROSSFADE_SECONDS))
     }
+}
+
+/// Set libmpv's pause flag, reporting failure.
+fn set_pause(core: &Mpv, paused: bool) -> Result<(), i32> {
+    core.command(&["set", "pause", if paused { "yes" } else { "no" }])
+}
+
+/// Set libmpv's mute flag.
+fn set_mute(core: &Mpv, muted: bool) {
+    let _ = core.command(&["set", "mute", if muted { "yes" } else { "no" }]);
+}
+
+/// Clamp a computed level to what mpv accepts and hand it over.
+fn set_volume(core: &Mpv, level: f64) {
+    let clamped = level.clamp(0.0, 100.0).round() as i64;
+    let _ = core.command(&["set", "volume", &clamped.to_string()]);
+}
+
+/// A crossfade in progress (issue #27, stage 3).
+///
+/// The pump owns this: it advances [`Fade::progress`] on every tick, hands the
+/// session over at the midpoint, and tears the outgoing core down at the end.
+#[derive(Clone)]
+struct Fade {
+    started: Instant,
+    /// Total overlap in seconds — already clamped to what is left of the track.
+    window: f64,
+    /// Core the incoming track is playing in.
+    incoming: usize,
+    /// Core still audible at the start of the ramp.
+    outgoing: usize,
+    /// Track index inside `tracks` that the incoming core holds.
+    incoming_track: usize,
+    /// The session already moved to `incoming` (the midpoint).
+    swapped: bool,
+    /// When the ramp was frozen by a pause. `started` is pushed forward on
+    /// resume, so a paused player does not run the fade out under the user.
+    paused_at: Option<Instant>,
+}
+
+impl Fade {
+    /// How far along the ramp we are, 0.0 → 1.0.
+    fn progress(&self, now: Instant) -> f64 {
+        if self.window <= 0.0 {
+            return 1.0;
+        }
+        (now.duration_since(self.started).as_secs_f64() / self.window).clamp(0.0, 1.0)
+    }
+}
+
+/// Equal-power gain for one side of the ramp.
+///
+/// A linear fade dips in the middle (two 0.5 signals sum to 0.7); `sin`/`cos`
+/// keeps the perceived loudness flat, which is the whole reason a crossfade
+/// sounds like one continuous performance instead of a dip.
+fn equal_power(t: f64) -> (f64, f64) {
+    let angle = t * std::f64::consts::FRAC_PI_2;
+    (angle.cos(), angle.sin())
 }
 
 /// Full playback state pushed to the frontend on `player-state`.
@@ -274,6 +336,16 @@ pub struct Player {
     engine: Mutex<Engine>,
     /// Crossfade preferences; written from any thread, read by the pump.
     crossfade: Mutex<Crossfade>,
+    /// The crossfade currently ramping, if any. Pump thread only.
+    fade: Mutex<Option<Fade>>,
+    /// Whether the "crossfade needs exclusive output" refusal was already logged.
+    /// `maybe_prefetch` runs on every pump tick, so an unguarded warning would
+    /// fill the log.
+    crossfade_refusal_logged: AtomicBool,
+    /// What the user asked for, 0–100. Tracked separately from libmpv's
+    /// `volume` because during a fade the cores are driven below it, and the
+    /// reported volume has to stay the user's choice (issue #27, stage 3).
+    user_volume: AtomicI64,
     /// Last state produced by the pump; read by any thread without mpv calls.
     state: Mutex<PlayerState>,
     tracks: Mutex<Vec<Track>>,
@@ -351,6 +423,9 @@ impl Player {
         let player = Arc::new(Self {
             engine: Mutex::new(Engine::empty()),
             crossfade: Mutex::new(Crossfade::default()),
+            crossfade_refusal_logged: AtomicBool::new(false),
+            fade: Mutex::new(None),
+            user_volume: AtomicI64::new(80),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
@@ -393,16 +468,13 @@ impl Player {
         let pump_player = Arc::clone(&player);
         let handle = std::thread::spawn(move || {
             let mut engine = Engine::empty();
-            match engine.init_primary(&options) {
-                Ok(api) => {
-                    *pump_player.engine.lock().unwrap() = engine;
-                    let _ = ready_tx.send(Ok(()));
-                    Self::pump(&pump_player, api);
-                }
-                Err(err) => {
-                    let _ = ready_tx.send(Err(err));
-                }
+            if let Err(err) = engine.init_primary(&options) {
+                let _ = ready_tx.send(Err(err));
+                return;
             }
+            *pump_player.engine.lock().unwrap() = engine;
+            let _ = ready_tx.send(Ok(()));
+            Self::pump(&pump_player);
         });
         let pump_id = handle.thread().id();
         *player.thread.lock().unwrap() = Some(handle);
@@ -697,12 +769,17 @@ impl Player {
             }
         }
         self.stopped.store(true, Ordering::SeqCst);
-        // The pump is gone, so releasing a leftover prefetch core here is safe:
-        // `Mpv::drop` calls `mpv_terminate`, and with no pump left there is no
-        // other libmpv work it could race. While the pump is alive this must
+        // The pump is gone, so releasing the cores that are not playing here is
+        // safe: `Mpv::drop` calls `mpv_terminate`, and with no pump left there is
+        // no other libmpv work it could race. While the pump is alive this must
         // stay on its thread — hence `Cmd::ClearPrefetch` rather than a direct
         // `take_idle` from a command thread.
-        drop(self.engine.lock().unwrap().take_idle());
+        //
+        // Both roles are drained because a shutdown can land mid-ramp, where the
+        // prefetching core is fading in and a third one is fading out.
+        let mut engine = self.engine.lock().unwrap();
+        drop(engine.take_idle());
+        drop(engine.take_outgoing());
     }
 
     /// Queue a command for the pump. Never touches the mpv handle: a
@@ -770,9 +847,11 @@ impl Player {
                     }
                     return;
                 }
-                let api = self.api();
-                let paused = api.get_flag("pause").unwrap_or(false);
-                let _ = api.command(&["set", "pause", if paused { "no" } else { "yes" }]);
+                let paused = self.api().get_flag("pause").unwrap_or(false);
+                // Not just the active core: pausing during a crossfade has to
+                // silence the fading one too, or the user keeps hearing a track
+                // they believe is paused (issue #27).
+                self.set_pause_everywhere(!paused);
                 self.emit();
             }
             Cmd::Next => {
@@ -803,24 +882,30 @@ impl Player {
                 self.emit();
             }
             Cmd::SetVolume(volume) => {
-                let api = self.api();
-                let _ = api.command(&["set", "volume", &volume.to_string()]);
+                // Remember the user's choice, then apply it to whatever can be
+                // heard. During a fade the cores are driven below it.
+                self.user_volume
+                    .store(volume.clamp(0, 100), Ordering::Relaxed);
+                self.apply_volume_to_audible();
                 self.emit();
             }
             Cmd::ToggleMute => {
-                let api = self.api();
-                let muted = api.get_flag("mute").unwrap_or(false);
-                let _ = api.command(&["set", "mute", if muted { "no" } else { "yes" }]);
+                let muted = self.api().get_flag("mute").unwrap_or(false);
+                self.set_mute_everywhere(!muted);
                 self.emit();
             }
             Cmd::SetMute(mute) => {
-                let api = self.api();
-                let _ = api.command(&["set", "mute", if mute { "yes" } else { "no" }]);
+                self.set_mute_everywhere(mute);
                 self.emit();
             }
             Cmd::SetSpeed(speed) => {
                 let api = self.api();
                 let _ = api.command(&["set", "speed", &speed.to_string()]);
+                // A track that is already crossfading in was loaded at the old
+                // speed; it has to follow the session's (issue #27).
+                if let Some(incoming) = self.engine.lock().unwrap().idle() {
+                    let _ = incoming.command(&["set", "speed", &speed.to_string()]);
+                }
                 self.emit();
             }
             Cmd::SetEq { preamp, gains } => {
@@ -830,14 +915,28 @@ impl Player {
                     preamp,
                     gains: gains.clone(),
                 };
+                let chain = eq_af_chain(preamp, &gains);
                 let api = self.api();
-                match eq_af_chain(preamp, &gains) {
+                match &chain {
                     Some(chain) => {
-                        let _ = api.command(&["set", "af", &chain]);
+                        let _ = api.command(&["set", "af", chain]);
                     }
                     None => {
                         // Flat EQ → drop the whole filter chain.
                         let _ = api.command(&["set", "af", ""]);
+                    }
+                }
+                // A crossfading track that is already loaded would otherwise
+                // keep the chain it was prefetched with, so the first half of it
+                // would come in under the old EQ (issue #27).
+                {
+                    let mut engine = self.engine.lock().unwrap();
+                    if engine.idle_af() != chain.as_deref() {
+                        if let Some(idle) = engine.idle() {
+                            let af = chain.clone().unwrap_or_default();
+                            let _ = idle.command(&["set", "af", &af]);
+                            engine.set_idle_af(chain.clone());
+                        }
                     }
                 }
                 self.emit();
@@ -846,11 +945,18 @@ impl Player {
                 *self.replaygain.lock().unwrap() = mode;
                 let api = self.api();
                 let _ = api.command(&["set", "replaygain", mode.as_mpv()]);
+                // Same reasoning as the EQ above.
+                if let Some(idle) = self.engine.lock().unwrap().idle() {
+                    let _ = idle.command(&["set", "replaygain", mode.as_mpv()]);
+                }
                 self.emit();
             }
             Cmd::SetShuffle(on) => self.apply_shuffle(on),
             Cmd::Reshuffle => self.apply_reshuffle(),
             Cmd::Stop => {
+                // A ramp in flight has to be landed first: stopping only the
+                // active core would leave the other one audible.
+                self.abandon_fade();
                 self.stopped.store(true, Ordering::SeqCst);
                 let _ = self.api().command(&["stop"]);
                 self.emit();
@@ -868,10 +974,14 @@ impl Player {
                 // Turning crossfade off must not leave a prefetched core lying
                 // around: nothing would ever consume it.
                 if next.window().is_none() {
+                    self.abandon_fade();
                     self.clear_prefetch();
                 }
             }
-            Cmd::ClearPrefetch => self.clear_prefetch(),
+            Cmd::ClearPrefetch => {
+                self.abandon_fade();
+                self.clear_prefetch();
+            }
             // Both device commands run here because they read/set mpv
             // properties, and only the pump may touch libmpv.
             Cmd::ListDevices(reply) => {
@@ -897,6 +1007,10 @@ impl Player {
     }
 
     fn play_index(&self, index: usize) {
+        // Loading a different track supersedes any ramp: the other core is
+        // stopped here, so a fade can never leave two cores audible.
+        self.abandon_fade();
+        self.clear_prefetch();
         let path = {
             let mut q = self.queue.lock().unwrap();
             *q = q.start(index);
@@ -910,7 +1024,7 @@ impl Player {
         self.emit();
     }
 
-    fn pump(player: &Arc<Player>, api: Arc<Mpv>) {
+    fn pump(player: &Arc<Player>) {
         let mut last_tick = std::time::Instant::now();
         loop {
             if player.cancelled.load(Ordering::SeqCst) {
@@ -953,31 +1067,94 @@ impl Player {
             // also keep command latency low. No other thread ever calls
             // into mpv (`mpv_wakeup` included) — a cross-thread wakeup
             // racing a synchronous command deadlocks it.
-            let event = api.wait_event(WAIT_SLICE);
+            //
+            // Advance any crossfade before waiting, so the ramp keeps stepping
+            // at the rate the fade needs (issue #27).
+            let fading = player.advance_fade();
+
+            // Poll every core without blocking first: during a crossfade the
+            // prefetching and the fading-out cores produce events too, and the
+            // outgoing core's EOF is what ends a ramp early.
+            //
+            // The slot list is collected first: a temporary guard inside a
+            // `for` head would live for the whole loop and the lock inside the
+            // body would deadlock against it.
+            let mut busy = false;
+            let slots = player.engine.lock().unwrap().live_slots();
+            for slot in slots {
+                let Some(core) = player.engine.lock().unwrap().core(slot) else {
+                    continue;
+                };
+                while let Some(event) = core.wait_event(0.0) {
+                    busy = true;
+                    player.handle_event(slot, event);
+                }
+            }
+
+            if !busy {
+                // Nothing pending anywhere: block on the audible core. A fade
+                // needs finer steps than a state tick, so it shortens the slice.
+                let slice = if fading { FADE_SLICE } else { WAIT_SLICE };
+                let (slot, core) = {
+                    let engine = player.engine.lock().unwrap();
+                    (engine.active_slot(), engine.active())
+                };
+                if let Some(event) = core.wait_event(slice) {
+                    player.handle_event(slot, event);
+                }
+            }
+
+            if last_tick.elapsed() >= TICK_EVERY {
+                // Emit, then consider prefetching (issue #27): doing it in the
+                // same tick means the state the user sees and the prefetch
+                // decision come from the same snapshot.
+                player.emit();
+                player.maybe_prefetch();
+                last_tick = std::time::Instant::now();
+            }
             if player.cancelled.load(Ordering::SeqCst) {
                 break;
-            }
-            match event {
-                Some(MpvEvent::LogMessage(text)) => {
-                    // Only produced when `IWAKS_MPV_LOG` is set at startup.
-                    iwaks_log::line(iwaks_log::Level::Debug, &format!("mpv: {text}"));
-                }
-                Some(MpvEvent::EndFile(reason)) => player.on_end_file(reason),
-                Some(MpvEvent::FileLoaded) => player.emit(),
-                // EVENT_NONE = timeout: refresh state, but at most ~10 Hz.
-                None if last_tick.elapsed() >= TICK_EVERY => {
-                    // Emit, then consider prefetching (issue #27): doing it in
-                    // the same tick means the state the user sees and the
-                    // prefetch decision come from the same snapshot.
-                    player.emit();
-                    player.maybe_prefetch();
-                    last_tick = std::time::Instant::now();
-                }
-                _ => {}
             }
         }
     }
 
+    /// Handle one event, knowing which core it came from (pump thread only).
+    ///
+    /// The core matters: an EOF from the fading-out core ends the ramp early,
+    /// and a FileLoaded from a prefetching core is not a track change.
+    fn handle_event(&self, slot: usize, event: MpvEvent) {
+        match event {
+            MpvEvent::LogMessage(text) => {
+                // Only produced when IWAKS_MPV_LOG is set at startup.
+                iwaks_log::line(iwaks_log::Level::Debug, &format!("mpv: {text}"));
+            }
+            MpvEvent::EndFile(reason) => {
+                // The fading-out core is the one the ramp is draining, and it
+                // is asked for first: before the handover it *is* the active
+                // slot, but its EOF must land the fade rather than advance the
+                // queue, which the handover has already done.
+                let fading = self.fade.lock().unwrap().clone();
+                if let Some(fade) = fading {
+                    if slot == fade.outgoing {
+                        // The fading track reached its end before the ramp did
+                        // (the window is clamped to what was left of it).
+                        self.finish_fade();
+                        return;
+                    }
+                }
+                if slot == self.engine.lock().unwrap().active_slot() {
+                    self.on_end_file(reason);
+                }
+            }
+            MpvEvent::FileLoaded => {
+                if slot == self.engine.lock().unwrap().active_slot() {
+                    self.emit();
+                }
+            }
+            // EVENT_NONE never reaches here: the pump treats it as "nothing".
+            MpvEvent::Other(_) | MpvEvent::Shutdown => {}
+        }
+    }
     fn on_end_file(&self, reason: EndFileReason) {
         // `Redirect` = the file could not be demuxed (mpv reports unreadable
         // input that way) — treat it like an error so the queue moves on.
@@ -1021,6 +1198,217 @@ impl Player {
         self.commands.lock().unwrap().push_back(Cmd::Load(index));
     }
 
+    /// Push the user's volume to the cores that can be heard right now.
+    ///
+    /// Outside a fade that is just the active core at full volume. During one it
+    /// is the active core scaled by the incoming side of the ramp — the outgoing
+    /// core keeps its own level, written by [`Player::advance_fade`].
+    fn apply_volume_to_audible(&self) {
+        let user = self.user_volume.load(Ordering::Relaxed);
+        let level = match self.fade.lock().unwrap().clone() {
+            Some(fade) if fade.swapped => {
+                user as f64 * equal_power(fade.progress(Instant::now())).1
+            }
+            _ => user as f64,
+        };
+        let api = self.api();
+        set_volume(&api, level);
+    }
+
+    /// Pause or resume every core that can be heard right now.
+    ///
+    /// Normally that is just the active core, but during a crossfade two are
+    /// audible and both have to follow — pausing one leaves the other playing
+    /// something the user believes is stopped. The ramp is frozen while paused
+    /// and resumes from the same point (issue #27).
+    fn set_pause_everywhere(&self, paused: bool) {
+        let fade = self.fade.lock().unwrap().clone();
+        let audible = {
+            let engine = self.engine.lock().unwrap();
+            let mut slots = vec![engine.active_slot()];
+            if let Some(fade) = fade.as_ref() {
+                for slot in [fade.incoming, fade.outgoing] {
+                    if !slots.contains(&slot) && engine.core(slot).is_some() {
+                        slots.push(slot);
+                    }
+                }
+            }
+            slots
+        };
+        for slot in audible {
+            if let Some(core) = self.engine.lock().unwrap().core(slot) {
+                let _ = set_pause(&core, paused);
+            }
+        }
+        let mut slot = self.fade.lock().unwrap();
+        if let Some(fade) = slot.as_mut() {
+            match (paused, fade.paused_at) {
+                (true, None) => fade.paused_at = Some(Instant::now()),
+                (false, Some(since)) => {
+                    fade.started += since.elapsed();
+                    fade.paused_at = None;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Mute (or unmute) every core. During a fade two of them are audible, and
+    /// a prefetching one has to be in the same state or it would blast at the
+    /// moment the ramp gives it volume.
+    fn set_mute_everywhere(&self, mute: bool) {
+        let flag = if mute { "yes" } else { "no" };
+        let slots = self.engine.lock().unwrap().live_slots();
+        for slot in slots {
+            let Some(core) = self.engine.lock().unwrap().core(slot) else {
+                continue;
+            };
+            let _ = core.command(&["set", "mute", flag]);
+        }
+    }
+
+    /// The next track is loaded and ready; cross it with the current one
+    /// (pump thread only). A no-op when crossfade is off, which is what makes
+    /// the prefetch in stage 2 silent.
+    fn start_fade(&self, incoming: &Arc<Mpv>, incoming_slot: usize, track: usize, window: f64) {
+        if self.fade.lock().unwrap().is_some() {
+            return; // one ramp at a time; the free slot is spoken for
+        }
+        let outgoing_slot = self.engine.lock().unwrap().active_slot();
+
+        // The incoming core starts silent, then ramps up; the outgoing one is
+        // dragged down from the user's volume. Note that the engine is *not*
+        // told about a fading-out slot yet: until the midpoint that core is
+        // still the one playing.
+        set_volume(incoming, 0.0);
+        if set_pause(incoming, false).is_err() {
+            return;
+        }
+
+        *self.fade.lock().unwrap() = Some(Fade {
+            started: Instant::now(),
+            window,
+            incoming: incoming_slot,
+            outgoing: outgoing_slot,
+            incoming_track: track,
+            swapped: false,
+            paused_at: None,
+        });
+
+        // Both sides are audible now, so both need the current mute state.
+        let muted = self.api().get_flag("mute").unwrap_or(false);
+        set_mute(incoming, muted);
+        iwaks_log::line(
+            iwaks_log::Level::Debug,
+            &format!("crossfade started ({window:.1}s)"),
+        );
+        self.emit();
+    }
+
+    /// One step of the ramp. Returns true while a fade is still running, so the
+    /// pump can shorten its wait slice and keep the steps smooth.
+    fn advance_fade(&self) -> bool {
+        let now = Instant::now();
+        let Some(fade) = self.fade.lock().unwrap().clone() else {
+            return false;
+        };
+        let t = fade.progress(now);
+        if fade.paused_at.is_some() {
+            // Nothing to ramp while the player is paused. Report "not fading" so
+            // the pump goes back to its normal wait slice instead of spinning.
+            return false;
+        }
+        let (out_gain, in_gain) = equal_power(t);
+        let user = self.user_volume.load(Ordering::Relaxed) as f64;
+
+        let outgoing = self.engine.lock().unwrap().core(fade.outgoing);
+        let incoming = self.engine.lock().unwrap().core(fade.incoming);
+        if let Some(core) = outgoing.as_ref() {
+            set_volume(core, user * out_gain);
+        }
+        if let Some(core) = incoming.as_ref() {
+            set_volume(core, user * in_gain);
+        }
+
+        // Midpoint: the incoming track is the louder one, so it takes over the
+        // transport. The outgoing core keeps fading out — it is no longer active,
+        // but it is still audible, which is why the engine has three slots.
+        if !fade.swapped && t >= 0.5 && self.hand_over(&fade) {
+            self.emit();
+        }
+
+        if t >= 1.0 {
+            self.finish_fade();
+            return false;
+        }
+        true
+    }
+
+    /// Hand the session to the incoming core (pump thread only).
+    ///
+    /// Idempotent: a fade that already handed over returns `false` and changes
+    /// nothing. Reports whether this call was the one that did it, so the caller
+    /// knows whether the published state moved.
+    fn hand_over(&self, fade: &Fade) -> bool {
+        if fade.swapped {
+            return false;
+        }
+        {
+            let mut engine = self.engine.lock().unwrap();
+            engine.make_active(fade.incoming);
+            // Only now: before the midpoint the fading core was the active one.
+            engine.set_outgoing(fade.outgoing);
+        }
+        let adopted = self.queue.lock().unwrap().adopt_track(fade.incoming_track);
+        *self.queue.lock().unwrap() = adopted;
+        let mut slot = self.fade.lock().unwrap();
+        let Some(current) = slot.as_mut() else {
+            return false;
+        };
+        current.swapped = true;
+        iwaks_log::line(iwaks_log::Level::Debug, "crossfade handed over");
+        true
+    }
+
+    /// Land a ramp: hand over if it has not happened yet, then stop the core
+    /// that was fading out and restore the session's volume.
+    ///
+    /// The handover runs even when the ramp was cut short by the fading track
+    /// reaching its end — the incoming track is already audible at that point, so
+    /// leaving it without a session would play audio nothing can control.
+    fn finish_fade(&self) {
+        let Some(fade) = self.fade.lock().unwrap().take() else {
+            return;
+        };
+        self.hand_over(&fade);
+        if let Some(core) = self.engine.lock().unwrap().take_outgoing() {
+            let _ = core.command(&["stop"]);
+        }
+        self.apply_volume_to_audible();
+        self.emit();
+    }
+
+    /// Abandon a fade without a handover — anything that changes what is playing
+    /// while one is in flight. Without this, an interrupted ramp would leave a
+    /// second core audible.
+    fn abandon_fade(&self) {
+        let Some(fade) = self.fade.lock().unwrap().take() else {
+            return;
+        };
+        // After a handover the fading core is the engine's outgoing one; before
+        // it, the incoming core is still prefetched and has to be dropped too.
+        if let Some(core) = self.engine.lock().unwrap().take_outgoing() {
+            let _ = core.command(&["stop"]);
+        }
+        if !fade.swapped {
+            let taken = self.engine.lock().unwrap().take_idle();
+            if let Some(core) = taken {
+                let _ = core.command(&["stop"]);
+            }
+        }
+        self.apply_volume_to_audible();
+    }
+
     /// Drop the prefetched track and stop its core. Pump thread only (libmpv).
     fn clear_prefetch(&self) {
         let taken = self.engine.lock().unwrap().take_idle();
@@ -1042,10 +1430,33 @@ impl Player {
         if self.engine.lock().unwrap().has_idle() {
             return; // already waiting
         }
+        // Exclusive output owns the device for the whole session, so a second
+        // core cannot open it. Refusing the prefetch degrades crossfade to
+        // ordinary gapless playback, which beats failing exclusive mode — and
+        // logged once, because it would otherwise repeat on every pump tick
+        // (issue #27, risk table).
+        if self.engine.lock().unwrap().is_exclusive() {
+            if !self.crossfade_refusal_logged.swap(true, Ordering::SeqCst) {
+                iwaks_log::line(
+                    iwaks_log::Level::Warn,
+                    "crossfade is unavailable while exclusive output is on",
+                );
+            }
+            return;
+        }
+        // Before a handover the "free" slot is the core the ramp is fading *in*,
+        // and reloading it would throw the incoming track away. After it, the
+        // third core is genuinely free and a short next track can still be
+        // prefetched in time (issue #27).
+        if let Some(fade) = self.fade.lock().unwrap().clone() {
+            if !fade.swapped {
+                return;
+            }
+        }
 
         // One critical section (queue → tracks, the order used elsewhere) so the
         // decision and the path cannot come from two different queue states.
-        let next = {
+        let (after, path) = {
             let q = self.queue.lock().unwrap();
             let tracks = self.tracks.lock().unwrap();
             let Some(after) = q.after_end() else {
@@ -1054,19 +1465,28 @@ impl Player {
             if Some(after) == q.current() {
                 return; // repeat-one: the same track, nothing to prefetch
             }
-            tracks.get(after).map(|t| t.path.clone())
+            match tracks.get(after) {
+                Some(t) => (after, t.path.clone()),
+                None => return,
+            }
         };
-        let Some(path) = next else { return };
 
         // Only prefetch when the current track really is about to end.
         let s = self.snapshot();
         if s.duration <= 0.0 {
             return; // unknown length (a stream): no fade window to aim at
         }
-        if s.duration - s.position > window {
+        let remaining = s.duration - s.position;
+        if remaining > window {
             return;
         }
+        // Never ramp for longer than the track has left: the overlap should end
+        // with the track, not run into whatever follows it.
+        let window = window.min(remaining.max(MIN_CROSSFADE_SECONDS));
 
+        let Some(incoming_slot) = self.engine.lock().unwrap().idle_slot() else {
+            return;
+        };
         let Some(core) = self.engine.lock().unwrap().ensure_idle() else {
             return; // no second core available
         };
@@ -1094,8 +1514,9 @@ impl Player {
             self.clear_prefetch();
             return;
         }
-        // Paused is the whole guarantee of this stage.
-        let _ = core.command(&["set", "pause", "yes"]);
+        // Paused first: this is the stage-2 guarantee, and the fade below is the
+        // only thing allowed to un-pause it.
+        let _ = set_pause(&core, true);
 
         self.engine.lock().unwrap().set_idle_af(chain);
         iwaks_log::line(
@@ -1103,6 +1524,9 @@ impl Player {
             &format!("prefetched the next track ({window:.1}s window)"),
         );
         self.emit();
+
+        // Stage 3: cross it with what is playing right now.
+        self.start_fade(&core, incoming_slot, after, window);
     }
 
     fn emit(&self) {
@@ -1119,7 +1543,10 @@ impl Player {
         let position = api.get_double("playback-time").unwrap_or(0.0).max(0.0);
         let duration = api.get_double("duration").unwrap_or(0.0).max(0.0);
         let paused = api.get_flag("pause").unwrap_or(true);
-        let volume = api.get_i64("volume").unwrap_or(80).clamp(0, 100);
+        // The user's volume, not libmpv's: during a crossfade the cores are driven
+        // below it by the ramp, and the slider must not follow them down
+        // (issue #27).
+        let volume = self.user_volume.load(Ordering::Relaxed).clamp(0, 100);
         let mute = api.get_flag("mute").unwrap_or(false);
         let speed = api.get_double("speed").unwrap_or(1.0);
         let sleep_remaining = self
@@ -1193,6 +1620,9 @@ mod tests {
         Player {
             engine: Mutex::new(Engine::empty()),
             crossfade: Mutex::new(Crossfade::default()),
+            crossfade_refusal_logged: AtomicBool::new(false),
+            fade: Mutex::new(None),
+            user_volume: AtomicI64::new(80),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
@@ -2118,17 +2548,20 @@ mod tests {
 
     // ---- crossfade prefetch (issue #27, stage 2) ----
 
-    /// Two 2-second tracks: with a 3 s crossfade the whole of track A sits
-    /// inside the fade window, so a prefetch is due as soon as A has a
-    /// duration. The dir is returned so it outlives the test.
-    fn crossfade_fixture(name: &str) -> (PathBuf, Vec<Track>) {
+    /// Two tracks: A of `a_secs`, B a short 2 s follow-up. A prefetch is due once A
+    /// has `3 - window` seconds left, so a *long* A keeps the tests that only
+    /// care about the prefetch clear of the ramp's midpoint — that handover lands
+    /// `window / 2` after the prefetch, and a test that misses it would see the
+    /// new track instead of the old one. The dir is returned so it outlives the
+    /// test.
+    fn crossfade_fixture(name: &str, a_secs: f64) -> (PathBuf, Vec<Track>) {
         let dir = test_dir(name);
         let a = dir.join("a.wav");
         let b = dir.join("b.wav");
-        write_wav(&a, 2.0);
+        write_wav(&a, a_secs);
         write_wav(&b, 2.0);
         let tracks = vec![
-            track(a.to_str().unwrap(), "A", 2.0),
+            track(a.to_str().unwrap(), "A", a_secs),
             track(b.to_str().unwrap(), "B", 2.0),
         ];
         (dir, tracks)
@@ -2143,7 +2576,7 @@ mod tests {
             !Crossfade::default().enabled,
             "design 4.2: crossfade is opt-in"
         );
-        let (_dirs, tracks) = crossfade_fixture("xf-off");
+        let (_dirs, tracks) = crossfade_fixture("xf-off", 2.0);
         let player = start_player();
         player.play_tracks(tracks, 0);
         wait_for(&player, Duration::from_secs(5), |s| s.current.is_some()).expect("starts playing");
@@ -2162,7 +2595,7 @@ mod tests {
         if !have_libmpv() {
             return;
         }
-        let (_dirs, tracks) = crossfade_fixture("xf-prefetch");
+        let (_dirs, tracks) = crossfade_fixture("xf-prefetch", 6.0);
         let player = start_player();
         player.set_crossfade(Crossfade {
             enabled: true,
@@ -2170,7 +2603,7 @@ mod tests {
         });
         player.play_tracks(tracks, 0);
 
-        let state = wait_for(&player, Duration::from_secs(5), |s| s.prefetched)
+        let state = wait_for(&player, Duration::from_secs(10), |s| s.prefetched)
             .expect("the next track gets prefetched inside the window");
         // The whole point of this stage: prefetching is silent.
         assert_eq!(
@@ -2187,7 +2620,7 @@ mod tests {
         if !have_libmpv() {
             return;
         }
-        let (_dirs, tracks) = crossfade_fixture("xf-eq");
+        let (_dirs, tracks) = crossfade_fixture("xf-eq", 6.0);
         let player = start_player();
         // A real (non-flat) curve, so "same EQ as the audible core" is a
         // statement about content rather than two empty strings.
@@ -2199,7 +2632,7 @@ mod tests {
         });
         player.play_tracks(tracks, 0);
 
-        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+        wait_for(&player, Duration::from_secs(10), |s| s.prefetched).expect("prefetched");
         let applied = player
             .engine
             .lock()
@@ -2220,18 +2653,18 @@ mod tests {
         if !have_libmpv() {
             return;
         }
-        let (_dirs, tracks) = crossfade_fixture("xf-drop");
+        let (_dirs, tracks) = crossfade_fixture("xf-drop", 6.0);
         let player = start_player();
         player.set_crossfade(Crossfade {
             enabled: true,
             seconds: DEFAULT_CROSSFADE_SECONDS,
         });
         player.play_tracks(tracks.clone(), 0);
-        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+        wait_for(&player, Duration::from_secs(10), |s| s.prefetched).expect("prefetched");
 
         // A stale prefetch is the one thing stage 3 must never fade into.
         player.play_tracks(tracks, 0);
-        wait_for(&player, Duration::from_secs(5), |s| !s.prefetched)
+        wait_for(&player, Duration::from_secs(10), |s| !s.prefetched)
             .expect("a new list drops the prefetched track");
         player.shutdown();
     }
@@ -2241,21 +2674,198 @@ mod tests {
         if !have_libmpv() {
             return;
         }
-        let (_dirs, tracks) = crossfade_fixture("xf-turn-off");
+        let (_dirs, tracks) = crossfade_fixture("xf-turn-off", 6.0);
         let player = start_player();
         player.set_crossfade(Crossfade {
             enabled: true,
             seconds: DEFAULT_CROSSFADE_SECONDS,
         });
         player.play_tracks(tracks, 0);
-        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+        wait_for(&player, Duration::from_secs(10), |s| s.prefetched).expect("prefetched");
 
         player.set_crossfade(Crossfade {
             enabled: false,
             seconds: DEFAULT_CROSSFADE_SECONDS,
         });
-        wait_for(&player, Duration::from_secs(5), |s| !s.prefetched)
+        wait_for(&player, Duration::from_secs(10), |s| !s.prefetched)
             .expect("switching crossfade off leaves no core behind");
+        player.shutdown();
+    }
+
+    // ---- crossfade ramp (issue #27, stage 3) ----
+
+    #[test]
+    fn the_ramp_hands_the_session_to_the_incoming_track() {
+        if !have_libmpv() {
+            return;
+        }
+        // A 2 s A with a 1 s crossfade: the prefetch lands 1 s in, the handover
+        // half a second later, the ramp ends as A does.
+        let (_dirs, tracks) = crossfade_fixture("xf-ramp", 2.0);
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: 1.0,
+        });
+        player.play_tracks(tracks, 0);
+
+        let state = wait_for(&player, Duration::from_secs(10), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("B") && s.index == Some(1)
+        })
+        .expect("the incoming track takes over at the midpoint");
+        assert!(!state.paused, "the incoming track is playing, not waiting");
+        assert!(
+            state.position > 0.0 && state.position < 1.0,
+            "the new track is heard from its start, got {:?}",
+            state.position
+        );
+
+        // Once the ramp is over the session is back to a single core: the fading
+        // one was stopped and released, so nothing is left playing behind the
+        // track the user is looking at.
+        wait_for(&player, Duration::from_secs(10), |_| {
+            player.fade.lock().unwrap().is_none()
+        })
+        .expect("the ramp lands");
+        assert_eq!(
+            player.engine.lock().unwrap().live_slots().len(),
+            1,
+            "no core is left over once the fade is done"
+        );
+        player.shutdown();
+    }
+
+    #[test]
+    fn interrupting_a_crossfade_leaves_one_core_playing() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-interrupt", 6.0);
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(10), |s| s.prefetched).expect("prefetched");
+
+        // Switching crossfade off mid-ramp has to silence the fading core too:
+        // leaving it running would be an invisible track the user cannot stop.
+        player.set_crossfade(Crossfade {
+            enabled: false,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        wait_for(&player, Duration::from_secs(10), |_| {
+            !player.has_prefetched() && player.fade.lock().unwrap().is_none()
+        })
+        .expect("the ramp is abandoned");
+        assert_eq!(
+            player.engine.lock().unwrap().live_slots().len(),
+            1,
+            "only the core the user is listening to survives"
+        );
+        player.shutdown();
+    }
+
+    #[test]
+    fn pausing_during_a_crossfade_freezes_the_ramp() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-pause", 6.0);
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(10), |s| s.prefetched).expect("prefetched");
+
+        player.toggle_play();
+        wait_for(&player, Duration::from_secs(5), |s| s.paused).expect("paused");
+        // Well past the half of the window still to run. A ramp on wall-clock
+        // time would have finished, swapped the queue, and left the incoming
+        // track audible under a player the user believes is paused.
+        std::thread::sleep(Duration::from_millis(1800));
+        assert!(
+            player.fade.lock().unwrap().is_some(),
+            "a paused player does not run the fade out"
+        );
+        assert_eq!(
+            player.snapshot().current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "and the queue has not moved on"
+        );
+        player.shutdown();
+    }
+
+    #[test]
+    fn the_volume_ramp_is_equal_power() {
+        // Pure maths: two signals that sum linearly dip audibly in the middle,
+        // which is exactly what a crossfade must not do.
+        let (out_start, in_start) = equal_power(0.0);
+        assert!((out_start - 1.0).abs() < 1e-9 && in_start.abs() < 1e-9);
+        let (out_mid, in_mid) = equal_power(0.5);
+        assert!(
+            (out_mid * out_mid + in_mid * in_mid - 1.0).abs() < 1e-9,
+            "the pair holds constant power at the midpoint"
+        );
+        let (out_end, in_end) = equal_power(1.0);
+        assert!(out_end.abs() < 1e-9 && (in_end - 1.0).abs() < 1e-9);
+        // Monotonic: the outgoing side only ever gets quieter.
+        let mut previous = 1.0;
+        for step in 0..=20 {
+            let (out, _) = equal_power(step as f64 / 20.0);
+            assert!(out <= previous + 1e-9, "step {step} went backwards");
+            previous = out;
+        }
+    }
+
+    #[test]
+    fn exclusive_output_refuses_to_prefetch() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-exclusive", 6.0);
+        let sink: StateSink = Box::new(|_| {});
+        // `ao=null` keeps this off any real device — CI has no audio endpoint at
+        // all — so the only thing under test is that the session refuses to
+        // open a second core when it is exclusive.
+        let player = Player::start(
+            &Options {
+                ao_null: true,
+                audio_exclusive: true,
+                audio_device: String::new(),
+            },
+            sink,
+        )
+        .expect("an exclusive session still starts (ao=null ignores it)");
+        assert!(
+            player.engine.lock().unwrap().is_exclusive(),
+            "the session knows it is exclusive"
+        );
+
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(10), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("the track still plays");
+        // A negative assertion, so it needs a bounded wait: several pump ticks
+        // with the track well inside the fade window.
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(
+            !player.has_prefetched(),
+            "a second core cannot open an exclusive device"
+        );
+        assert_eq!(
+            player.engine.lock().unwrap().live_slots().len(),
+            1,
+            "and none was created"
+        );
         player.shutdown();
     }
 

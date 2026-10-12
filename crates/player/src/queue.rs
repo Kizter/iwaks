@@ -258,6 +258,25 @@ impl Queue {
             ..self.clone()
         }
     }
+
+    /// Adopt `track` as the current one, wherever it sits in the order.
+    ///
+    /// Used by a crossfade handover: the incoming core is already audible, so
+    /// the queue's idea of "current" has to move with it, or `next`/`prev` would
+    /// step from the track that just faded out. An unknown track leaves the
+    /// queue alone.
+    pub fn adopt_track(&self, track: usize) -> Self {
+        if self.len == 0 {
+            return self.clone();
+        }
+        let Some(pos) = self.order.iter().position(|&t| t == track) else {
+            return self.clone();
+        };
+        Self {
+            index: Some(pos),
+            ..self.clone()
+        }
+    }
 }
 
 /// Deterministic Fisher–Yates shuffle of `0..n` from a SplitMix64 generator.

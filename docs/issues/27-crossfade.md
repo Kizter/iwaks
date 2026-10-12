@@ -2,12 +2,14 @@
 title: "Crossfade (two libmpv cores + volume ramp)"
 labels: ["enhancement", "priority:P3", "area:player"]
 milestone: "v0.3.0"
-status: "planned"
+status: "in progress"
 ---
 
-> **Plan only.** This is the riskiest item on the v0.3.0 roadmap and it is
-> written down before any code, so the decision to attempt it is deliberate and
-> reversible at every stage.
+> **Plan, executed in stages.** This was the riskiest item on the v0.3.0
+> roadmap, written down before any code so the decision to attempt it stayed
+> deliberate and reversible at every stage. Stages 1–3 have landed (the feature
+> is code-complete but off by default); stage 4 — the two settings, the UI and
+> persistence — is what makes it reachable by a user.
 
 ## Summary
 
@@ -127,7 +129,7 @@ Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 320 passed, 8 ignore
 (5 live cover + 3 audio device), verified with `RUST_TEST_THREADS=1`; `npx
 tsc --noEmit` and `npm run build` clean.
 
-### Stage 3 — the ramp and the swap
+### Stage 3 — the ramp and the swap — **done**
 - At the fade start, un-pause the incoming core and ramp both volumes from the
   user's volume and 0 (equal-power curve, so the sum stays flat)
 - Swap `active` at the midpoint, stop the outgoing core, report the new
@@ -136,6 +138,58 @@ tsc --noEmit` and `npm run build` clean.
   mid-fade route to the right core and cannot race the swap
 - **DoD:** `next`/`prev`/shuffle during a fade keep playing audio; state stays
   consistent (one current track, correct `index`, `list_len`)
+
+**Outcome.** The ramp runs on the existing pump — no second thread — by polling
+every core with the non-blocking `mpv_wait_event(handle, 0)` the plan predicted,
+and blocking on the audible core only when nothing is pending anywhere. The
+consequences were worked out before the code was written, and two of them
+changed the shape of the thing:
+
+- **Three cores, not two.** The session hands over at the midpoint, so after it
+  the *new* core is active while the old one is still audible, and the track
+  after that wants prefetching in the same window. With two slots there is no
+  free core for that, so every other transition would degrade to a hard cut.
+  `CORES = 3` costs one more decoded stream, and only while crossfade is on.
+- **The user's volume is no longer libmpv's.** During a ramp each core is driven
+  to `user_volume × gain`, so `read_state` reading the `volume` property back
+  would have walked the slider down with the fade and then treated the faded
+  level as the user's choice. `Player` now owns `user_volume` and writes the
+  ramped value to the cores, which keeps the reported volume the user's setting.
+
+Everything else that had to be decided:
+
+- **The handover is idempotent and also runs when the ramp is cut short.** If the
+  fading track reaches its end before the ramp does — the window is clamped to
+  what is left, but `duration` can still be wrong — the incoming track is
+  already audible. Landing the fade hands it the session instead of leaving
+  audio playing that nothing can control.
+- **Pausing touches every audible core and freezes the ramp clock.** Pausing only
+  the active one would leave the other playing under a player the user believes
+  is stopped; letting the clock run would spend the ramp while paused. Mute, EQ,
+  ReplayGain and speed all reach the prefetching core too, for the same reason.
+- **`maybe_prefetch` stands down for the first half of a ramp.** Before the
+  handover the free slot *is* the core fading in, and reloading it would throw
+  the incoming track away. After the handover the third core is genuinely free,
+  so a very short next track is still prefetched in time.
+- **Exclusive output refuses the prefetch, and says so once.** `audio_exclusive`
+  is a startup-only option, so the guard lives in the player (`Engine::is_exclusive`)
+  rather than in the Tauri layer where the order of `apply_settings` calls could
+  get it wrong. Crossfade then degrades to ordinary gapless playback.
+- **Transport commands follow `active`,** which is the core the user is looking
+  at: before the midpoint that is the fading-out track (still what the queue
+  shows), after it the incoming one. `next`/`prev`/`load`/`stop` abandon the
+  ramp first, so no command can leave two cores audible.
+
+5 new tests: the handover reports the new track/index/position and leaves one
+core, interrupting a ramp leaves one core, pausing freezes the ramp and does not
+move the queue, equal-power is checked as maths (endpoints, midpoint, monotonic),
+and exclusive output never prefetches. The prefetch-only tests from stage 2 moved
+to a 6 s fixture: the midpoint lands `window / 2` after the prefetch, and a
+2 s fixture left a 1 s margin — too little for a loaded CI runner.
+
+Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 325 passed, 8 ignored
+(5 live cover + 3 audio device), verified with `RUST_TEST_THREADS=1`; the
+crossfade tests repeated three times to check the timing-sensitive ones.
 
 ### Stage 4 — setting, UI, persistence
 - **Two settings, not one.** `design.md` §4.2 says "toggle, default off", so
@@ -173,29 +227,31 @@ explains its cost in the same place — so this should be one sentence in
 > transitions are given up while it is on — tracks are no longer gapless — and
 > exclusive output is unavailable, so the two can't be combined.
 
-**D3 — whether Stage 1 alone is worth landing** if the rest is deferred. (Open.)
-It is a pure refactor that removes the last place "one mpv" is assumed.
+**D3 — whether Stage 1 alone is worth landing** if the rest is deferred. (Closed:
+it is moot.) Stages 1–3 are landing together, so there is no "stage 1 alone" left
+to weigh — the refactor is the smallest possible diff for the ramp, and shipping
+it on its own would have meant a featureless extra core slot.
 
 ## Risks, and what is done about each
 
 | Risk | Mitigation |
 |------|------------|
 | **Exclusive output cannot host two cores.** WASAPI exclusive takes the device; a second mpv instance on it will fail or be forced to shared. | Refuse to prefetch when `audio_exclusive` is on and log it once. Crossfade silently degrading to normal gapless is better than an exclusive-mode failure — and issue #24 makes exclusive an explicit opt-in, so the combination is rare and visible. |
-| **Wall-clock tests are flaky.** A real fade is a timing test. | Assert on *outcomes* (active index swapped, both instance volumes at the expected endpoints, state coherent) with a short fade (200 ms) and generous `wait_for` timeouts, not on exact sample positions. |
-| **Prefetch plays the wrong thing if the queue changes** (reshuffle, remove, clear during the fade window). | The prefetch is re-validated against the queue's current track before un-pausing; a mismatch cancels the fade instead of playing it. |
-| **Doubles the audio memory** (two decoded streams live). | Two cores is the cost of the feature; Stage 1 can measure it. If it matters, Stage 2 becomes "prefetch only while within the fade window", which bounds it to the last few seconds of a track. |
+| **Wall-clock tests are flaky.** A real fade is a timing test. | Assert on *outcomes* (which track is current, how many cores are live, whether a ramp is in flight) with generous `wait_for` timeouts, not on exact sample positions or ramp values. The equal-power curve itself is checked as pure maths. |
+| **Prefetch plays the wrong thing if the queue changes** (reshuffle, remove, clear during the fade window). | Stage 3 turned out not to need a deferred re-validation: the prefetch and the un-pause happen in the same pump iteration, and every queue mutation pushes `Cmd::ClearPrefetch`, which abandons the ramp. |
+| **Doubles the audio memory** (two decoded streams live). | Three cores in the worst case, but only during a ramp; the third is created on demand, so a session that never crossfades still holds exactly one. |
 | **Two cores contend for the audio device in shared mode.** | WASAPI shared mode is designed for multiple clients; this is the supported configuration. Flagged as the thing to verify by ear first after Stage 3. |
-| **A crash in the fade path leaves both cores running.** | The swap is a single guarded `active` reassignment; the outgoing core is stopped immediately after, and `Player::shutdown` stops both. |
+| **A crash in the fade path leaves both cores running.** | The swap is a single guarded `active` reassignment; the outgoing core is stopped and released by `finish_fade`, every interrupting command calls `abandon_fade`, and `Player::shutdown` drains both non-playing roles. |
 
 ## Acceptance criteria
 
 - [x] Stage 1 lands with all existing tests green and no behaviour change
 - [x] Prefetch never plays without being asked, and always with the current EQ
-- [ ] A completed crossfade reports the new track, correct index and position
-- [ ] Transport commands during a fade never leave both cores audible
-- [ ] Exclusive mode disables crossfade instead of failing
+- [x] A completed crossfade reports the new track, correct index and position
+- [x] Transport commands during a fade never leave both cores audible
+- [x] Exclusive mode disables crossfade instead of failing
 - [ ] Setting is off by default and survives a restart
-- [ ] `cargo fmt`/`clippy`/`test` and the frontend gates green at every stage
+- [x] `cargo fmt`/`clippy`/`test` and the frontend gates green at every stage
 
 ## Out of scope
 
@@ -210,13 +266,15 @@ It is a pure refactor that removes the last place "one mpv" is assumed.
 2. ~~Whether the gapless trade-off is surfaced in the UI~~ — **proposed**: yes, one
    sentence in the control's note (see D2). Not implemented yet; Stage 1 touches
    no UI.
-3. ~~Whether Stage 1 alone is worth landing~~ — **still open** (see D3).
+3. ~~Whether Stage 1 alone is worth landing~~ — **moot** (see D3): stages 1–3 land
+   together.
 
 ## References
 
 - `docs/design.md` §4.2 (the decision being implemented), §1 (core features)
-- `crates/player/src/player.rs` (`api: Mutex<Option<Arc<Mpv>>>`, `pump`,
-  `Cmd`, `read_state`)
+- `crates/player/src/player.rs` (`api()` → the engine's active core, `pump`,
+  `Cmd`, `read_state`, `Fade`)
+- `crates/player/src/engine.rs` (`CORES`, the role a slot holds, `setup_core`)
 - `crates/player/src/ffi.rs` (`Mpv::wait_event`, `command`, `get_*`)
 - `docs/issues/23-output-device-picker.md` (device state in `PlayerState`),
   `docs/issues/24-wasapi-exclusive-toggle.md` (the exclusive interaction)
