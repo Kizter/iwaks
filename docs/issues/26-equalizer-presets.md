@@ -1,7 +1,7 @@
 ---
 title: "Equalizer preset templates + save custom setups"
 labels: ["enhancement", "priority:P2", "area:player"]
-milestone: "v0.2.1"
+milestone: "v0.3.0"
 status: "done"
 ---
 
@@ -10,6 +10,11 @@ status: "done"
 Add a preset dropdown to the equalizer panel (built-in templates) and let the
 user save the current curve as a named custom preset, persisted across
 restarts.
+
+> **Numbering note.** This shipped *before* the numbered v0.3.0 batch
+> (`15`–`25`), but GitHub `#14` is the v0.2.0 roadmap meta issue, so this file
+> takes the next free slot rather than colliding with
+> `15-tag-editor-in-playlists`.
 
 ## Motivation
 

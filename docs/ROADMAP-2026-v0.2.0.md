@@ -2,7 +2,7 @@
 title: "Roadmap v0.2.0 — persistence, scan data-safety, player reliability, UX & a11y"
 labels: ["roadmap", "enhancement", "priority:P1"]
 milestone: "v0.2.0"
-status: "draft"
+status: "done"
 ---
 
 # Roadmap v0.2.0
@@ -47,33 +47,19 @@ stops misleading (search results, column alignment, labels, contrast).
 
 ## Checklist
 
-- [x] **01** Persist player settings & restore last session
-      <!-- docs/issues/01-persistence-settings.md -->
-- [x] **02** Scope `clean_missing` prune to scanned root; never prune on IO
-      errors <!-- docs/issues/02-scan-clean-missing-scope.md -->
-- [x] **03** Fix self-join deadlock when `Player::start` fails
-      <!-- docs/issues/03-player-start-deadlock.md -->
-- [x] **04** Empty state distinguishes "no results" from "empty library"
-      <!-- docs/issues/04-empty-state-search-results.md -->
-- [x] **05** Align list header "Time" with duration column
-      <!-- docs/issues/05-time-column-alignment.md -->
-- [x] **06** Queue view refreshes after reshuffle
-      <!-- docs/issues/06-queue-reshuffle-refresh.md -->
-- [x] **07** Volume slider commits on release, not per event
-      <!-- docs/issues/07-volume-slider-commit.md -->
-- [x] **08** `.m4a` badge corrected; friendly error copy
-      <!-- docs/issues/08-m4a-badge-and-error-copy.md -->
-- [x] **09** Accessibility pass (contrast, min type, keyboard reorder)
-      <!-- docs/issues/09-accessibility-pass.md -->
-- [x] **10** Album-art-dominant Now Playing view
-      <!-- docs/issues/10-now-playing-view.md -->
-- [x] **11** Visual consistency (font scale, radii tokens, one icon system)
-      <!-- docs/issues/11-visual-consistency-polish.md -->
-- [x] **12** Edge cases (dup playlist names, path dedupe, seek-blur, m3u
-      encoding) <!-- docs/issues/12-edge-cases-data-hygiene.md -->
-- [x] **13** YT Music fallback for cover art lookup (provider abstraction)
-      ([#13](https://github.com/Kizter/iwaks/issues/13))
-      <!-- docs/issues/13-ytmusic-cover-fallback.md -->
+- [x] #1 Persist player settings & restore last session
+- [x] #2 Scope `clean_missing` prune to scanned root; never prune on IO errors
+- [x] #3 Fix self-join deadlock when `Player::start` fails
+- [x] #4 Empty state distinguishes "no results" from "empty library"
+- [x] #5 Align list header "Time" with duration column
+- [x] #6 Queue view refreshes after reshuffle
+- [x] #7 Volume slider commits on release, not per event
+- [x] #8 `.m4a` badge corrected; friendly error copy
+- [x] #9 Accessibility pass (contrast, min type, keyboard reorder)
+- [x] #10 Album-art-dominant Now Playing view
+- [x] #11 Visual consistency (font scale, radii tokens, one icon system)
+- [x] #12 Edge cases (dup playlist names, path dedupe, seek-blur, m3u encoding)
+- [x] #13 YT Music fallback for cover art lookup (provider abstraction)
 
 ## Issue index
 

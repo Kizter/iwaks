@@ -53,7 +53,10 @@ expensive subsystems last.
 - [x] **24** WASAPI exclusive-output toggle
       <!-- docs/issues/24-wasapi-exclusive-toggle.md -->
 - [x] **25** Dark mode <!-- docs/issues/25-dark-mode.md -->
-- [ ] **26** Crossfade <!-- docs/issues/26-crossfade.md -->
+- [x] **26** Equalizer preset templates + save custom setups (shipped ahead of
+      this batch; GitHub `#14` is the v0.2.0 meta issue)
+      <!-- docs/issues/26-equalizer-presets.md -->
+- [ ] **27** Crossfade <!-- docs/issues/27-crossfade.md -->
 
 ## Issue index
 
@@ -70,7 +73,8 @@ expensive subsystems last.
 | 23 | M3 | medium-hard | player | `23-output-device-picker` |
 | 24 | M3 | medium-hard | player | `24-wasapi-exclusive-toggle` |
 | 25 | M4 | hard | polish | `25-dark-mode` |
-| 26 | M5 | hardest | player | `26-crossfade` |
+| 26 | M1 | easy | player | `26-equalizer-presets` (shipped before the batch) |
+| 27 | M5 | hardest | player | `27-crossfade` |
 
 ## Non-functional requirements (carry over from v0.2.0)
 
