@@ -1794,6 +1794,30 @@ mod tests {
     // ---- audio output (#23, #24) ----
 
     #[test]
+    fn listing_devices_without_a_pump_answers_instead_of_hanging() {
+        // The timeout guard, tested without libmpv: a player that never started
+        // has no pump to answer, so `list_devices` must give up and report an
+        // empty list rather than blocking the UI thread forever.
+        let player = bare_player(None, None);
+        let before = Instant::now();
+        let devices = player.list_devices();
+        let waited = before.elapsed();
+        assert!(devices.is_empty(), "nothing answered");
+        assert!(
+            waited >= DEVICE_TIMEOUT,
+            "it waited for the answer rather than returning early: {waited:?}"
+        );
+        assert!(
+            waited < DEVICE_TIMEOUT * 3,
+            "and it gave up instead of waiting forever: {waited:?}"
+        );
+        // Queuing a switch on a player with no pump is equally harmless.
+        player.set_audio_device("anything");
+        player.shutdown();
+    }
+
+    #[test]
+    #[ignore = "enumerates real audio devices; crashes libmpv on a machine with no audio device"]
     fn device_list_is_read_from_the_pump_and_answers_the_caller() {
         if !have_libmpv() {
             return;

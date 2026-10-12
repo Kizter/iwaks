@@ -59,32 +59,40 @@ it without a system-level default-device dance.
 3 new player tests: enumeration answers twice and stays consistent, the JSON
 contract of the property, and the device-switch pair below.
 
-**CI caught a crash these tests could not.** The first version of the switch test
-fed libmpv a fabricated device name (`iwaks-not-a-real-device`) to prove that a
-rejected switch does not stick. That passes on a dev machine with an audio
-device — and killed the CI binary with `STATUS_ACCESS_VIOLATION`
-(`0xc0000005`) on a runner with no audio endpoint, because `set audio-device`
-makes libmpv re-open an output that cannot exist. A native crash cannot be caught
-from Rust, so the whole test binary died and the build went red from this commit
-onward.
+**CI caught a crash these tests could not.** The device tests went red on CI with
+`STATUS_ACCESS_VIOLATION` (`0xc0000005`) in the player test binary — a native
+crash, not an assertion failure, so the whole binary died and every commit since
+has failed. `get_string` itself is sound (mpv allocates the string, we copy it
+and call `mpv_free`); the crash is **inside libmpv while it computes the
+`audio-device-list` property** on a runner with no audio endpoint. Two separate
+triggers had to be removed:
 
-The fix is not "handle the error" but "do not do that":
+- A fabricated device name (`set audio-device iwaks-not-a-real-device`) makes
+  libmpv re-open an output that cannot exist.
+- Even *reading* the device list does it, once the audio stack has nothing to
+  enumerate. So the enumeration test cannot run in CI either.
 
-- Tests now only ever send a name **mpv itself reported**, via
-  `first_selectable_device`, which prints a `SKIP:` line when there is none.
-- The two tests that actually switch output are `#[ignore]`d, matching the
-  existing pattern in `crates/cover/tests/live.rs` for tests that need the real
-  environment. They still exist and can be run by hand:
+The fix is not "handle the error" — a native crash cannot be caught from Rust —
+but to keep the automated suite away from the code path and say so out loud:
+
+- **`#[ignore]` on the three tests that touch mpv audio** (enumerate, select,
+  select-then-default), matching the existing `crates/cover/tests/live.rs`
+  pattern. They still exist and run by hand:
   `cargo test -p iwaks-player -- --ignored`.
-- The read path stays in CI: `list_devices` answering, twice, without hanging,
-  plus the offline JSON contract. That is the part this crate owns; whether the
-  OS opens the device it names is not.
-
-With `ao=null` (how every player test starts) mpv reports a single `auto`
-entry, which is why the crash needed a *fabricated* name to trigger locally.
+- **The timeout guard moved into CI**, where it is both safe and more valuable:
+  `listing_devices_without_a_pump_answers_instead_of_hanging` drives a player
+  that never started (so no libmpv is involved) and asserts `list_devices`
+  reports empty *after* waiting and *before* waiting forever. That is the
+  property a user actually feels — the window can never hang — and it needs no
+  audio hardware to prove.
+- The offline JSON contract test stays in CI.
+- Tests may only ever send a name mpv itself reported, via
+  `first_selectable_device`, which prints a `SKIP:` line when there is none.
+- Replaced the vague "pump still answering" assertion with real evidence:
+  `set_volume` + `wait_for` proves the pump still serves commands afterwards.
 
 `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace` (314 passed, 7 ignored: 5 live cover + 2 audio-device)
+`cargo test --workspace` (313 passed, 8 ignored: 5 live cover + 3 audio device)
 are green, as are `npx tsc --noEmit` and `npm run build`.
 
 ## References
