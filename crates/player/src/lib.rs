@@ -10,5 +10,7 @@ pub mod player;
 pub mod queue;
 
 pub use engine::Engine;
-pub use player::{AudioDevice, Options, Player, PlayerState, ReplayGainMode};
+pub use player::{
+    AudioDevice, Crossfade, Options, Player, PlayerState, ReplayGainMode, DEFAULT_CROSSFADE_SECONDS,
+};
 pub use queue::RepeatMode;

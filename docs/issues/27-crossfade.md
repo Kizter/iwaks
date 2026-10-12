@@ -80,13 +80,52 @@ costs no extra audio memory and cannot change what the user hears.
 Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 316 passed
 (54 existing player tests unchanged + 4 engine tests), 5 ignored live.
 
-### Stage 2 — prefetch
+### Stage 2 — prefetch — **done**
 - When the active track's remaining time ≤ fade duration, `loadfile` the next
   track into the idle core with `pause=yes`
 - The EQ filter chain is applied to the prefetched core *before* its first frame
   can play, otherwise the fade-in plays flat while the rest of the album does not
 - **DoD:** prefetch is observable in state (`prefetched: bool`); a prefetched
   track never changes what is audible on its own
+
+**Outcome.** The pump's existing ~10 Hz tick now emits and *then* considers a
+prefetch, so the state the user sees and the prefetch decision come from the
+same snapshot. Loading is `pause=yes`, which is this stage's entire guarantee:
+nothing about it is audible, and stage 3 is what changes that.
+
+- **Off by default, so this stage is invisible in the shipped app.**
+  `Crossfade::default()` is `{enabled: false, seconds: 3.0}` per design §4.2.
+  `maybe_prefetch` returns immediately when `window()` is `None`. A test asserts
+  the negative: play a track that is already inside a 3 s window and confirm
+  nothing is prefetched after several pump ticks.
+- **"The next track" is resolved by `after_end()`**, i.e. the track that will
+  actually play when this one finishes, honouring repeat-all wrap. Repeat-one is
+  skipped explicitly: `after_end()` returns the *same* track, and prefetching
+  the current track into a second core would be pointless work.
+- **The incoming core is filtered like the audible one.** The `af` chain and
+  the ReplayGain mode are applied *before* `loadfile`, so the first frame is
+  already EQ'd. The chain actually handed over is recorded on the `Engine`
+  (`idle_af`) — not only for tests: if the user moves a slider during the fade
+  window, stage 3 needs to know whether the incoming core is stale.
+- **A stale prefetch is dropped, never faded into.** `play_tracks`,
+  `reorder_queue`, `remove_queue_at` and `clear_queue` all queue
+  `Cmd::ClearPrefetch`.
+- **The clear runs on the pump, and that mattered.** The first version dropped
+  the idle core directly from the caller's thread. `Mpv::drop` calls
+  `mpv_terminate`, so that would have run libmpv off the pump thread — exactly
+  the invariant this crate protects. Queue mutations now push a command, and the
+  only place a core is released from a foreign thread is `shutdown()`, *after*
+  the pump has been joined, where there is nothing left to race.
+- `MIN_CROSSFADE_SECONDS = 0.5` floors a nonsensical duration (negative, NaN)
+  instead of letting it produce a window that opens after the track ended.
+
+6 new tests: off by default, prefetch happens and changes nothing audible, the
+idle core carries the current EQ, a queue edit drops the prefetch, switching
+crossfade off releases the core, and pure validation of the preferences.
+
+Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 320 passed, 8 ignored
+(5 live cover + 3 audio device), verified with `RUST_TEST_THREADS=1`; `npx
+tsc --noEmit` and `npm run build` clean.
 
 ### Stage 3 — the ramp and the swap
 - At the fade start, un-pause the incoming core and ramp both volumes from the
@@ -151,7 +190,7 @@ It is a pure refactor that removes the last place "one mpv" is assumed.
 ## Acceptance criteria
 
 - [x] Stage 1 lands with all existing tests green and no behaviour change
-- [ ] Prefetch never plays without being asked, and always with the current EQ
+- [x] Prefetch never plays without being asked, and always with the current EQ
 - [ ] A completed crossfade reports the new track, correct index and position
 - [ ] Transport commands during a fade never leave both cores audible
 - [ ] Exclusive mode disables crossfade instead of failing

@@ -8,7 +8,8 @@ use iwaks_library::persist::EqPreset;
 use iwaks_library::playlists::Playlist;
 use iwaks_library::scan::{scan, scan_files, ScanOptions, ScanProgress};
 use iwaks_player::{
-    AudioDevice, Options as PlayerOptions, Player, PlayerState, RepeatMode, ReplayGainMode,
+    AudioDevice, Crossfade, Options as PlayerOptions, Player, PlayerState, RepeatMode,
+    ReplayGainMode, DEFAULT_CROSSFADE_SECONDS,
 };
 use iwaks_presence::NowPlaying;
 use serde::Serialize;
@@ -117,6 +118,26 @@ pub const SETTING_AUDIO_DEVICE: &str = "audio.device";
 pub const SETTING_AUDIO_EXCLUSIVE: &str = "audio.exclusive";
 /// UI theme: `system`, `light` or `dark` (issue #25).
 pub const SETTING_THEME: &str = "ui.theme";
+/// Crossfade on/off (issue #27). Off by default, per design §4.2.
+pub const SETTING_CROSSFADE: &str = "audio.crossfade";
+/// Crossfade overlap in seconds (issue #27). Kept separate from the on/off flag
+/// so a short fade is expressible.
+pub const SETTING_CROSSFADE_SECONDS: &str = "audio.crossfade_seconds";
+
+/// The stored crossfade preferences, falling back to the plan's defaults.
+///
+/// Two settings rather than one sentinel: `seconds = 0` has to stay a legal
+/// (if silly) duration, so "off" needs its own flag.
+fn stored_crossfade(db_path: &Path) -> Crossfade {
+    let seconds = read_setting(db_path, SETTING_CROSSFADE_SECONDS)
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .filter(|s| s.is_finite())
+        .unwrap_or(DEFAULT_CROSSFADE_SECONDS);
+    Crossfade {
+        enabled: read_setting(db_path, SETTING_CROSSFADE).as_deref() == Some("true"),
+        seconds,
+    }
+}
 
 fn read_setting(db_path: &Path, key: &str) -> Option<String> {
     Library::open(&db_path.to_string_lossy())
@@ -865,6 +886,7 @@ pub fn run() {
                         persist::restore_session(&p, &lib, &session);
                     }
                 }
+                p.set_crossfade(stored_crossfade(&db_path));
             }
 
             let persist = persist::Persist::spawn(db_path.clone(), Arc::clone(&player_cell));

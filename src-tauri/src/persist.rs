@@ -195,6 +195,7 @@ mod tests {
             eq: vec![1.0; 10],
             replaygain: ReplayGainMode::Album,
             audio_device: String::new(),
+            prefetched: false,
         }
     }
 

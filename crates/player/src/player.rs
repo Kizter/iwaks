@@ -76,6 +76,43 @@ pub struct AudioDevice {
 /// a wedged audio stack cannot hang the UI thread forever.
 const DEVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// Crossfade preferences (issue #27). `enabled` is the separate flag the plan
+/// settled on: a duration of 0 must be able to mean "very short fade", not
+/// "off".
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Crossfade {
+    pub enabled: bool,
+    /// Seconds of overlap requested. Only read when `enabled`.
+    pub seconds: f64,
+}
+
+impl Default for Crossfade {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        }
+    }
+}
+
+/// The value the plan's D1 decision settled on.
+pub const DEFAULT_CROSSFADE_SECONDS: f64 = 3.0;
+
+/// Never prefetch on a window shorter than this, whatever the user asks for: a
+/// fade window has to be long enough to be audible at all.
+const MIN_CROSSFADE_SECONDS: f64 = 0.5;
+
+impl Crossfade {
+    /// The overlap to actually use, or `None` when crossfade is off or the
+    /// request is unusable.
+    fn window(&self) -> Option<f64> {
+        if !self.enabled || !self.seconds.is_finite() {
+            return None;
+        }
+        Some(self.seconds.max(MIN_CROSSFADE_SECONDS))
+    }
+}
+
 /// Full playback state pushed to the frontend on `player-state`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +148,10 @@ pub struct PlayerState {
     /// Active mpv `audio-device` (empty = the OS default), so Settings can show
     /// which output is in use even after the device is unplugged (issue #23).
     pub audio_device: String,
+    /// True while the next track sits loaded and paused in the second core,
+    /// waiting for its fade (issue #27). Prefetching never changes what is
+    /// audible — only stage 3 turns this into sound.
+    pub prefetched: bool,
 }
 
 /// ReplayGain mode (libmpv `replaygain` option).
@@ -218,6 +259,10 @@ enum Cmd {
     ListDevices(mpsc::Sender<Vec<AudioDevice>>),
     /// Apply a new `audio-device` on the pump thread.
     SetAudioDevice(String),
+    /// Drop a prefetched track (queue changed underneath it).
+    ClearPrefetch,
+    /// Update the crossfade preferences. No libmpv work; the pump reads them.
+    SetCrossfade(Crossfade),
 }
 
 pub struct Player {
@@ -227,6 +272,8 @@ pub struct Player {
     /// `shutdown`-adjacent cleanup — no other thread ever issues an mpv call,
     /// so no cross-thread wakeup is needed.
     engine: Mutex<Engine>,
+    /// Crossfade preferences; written from any thread, read by the pump.
+    crossfade: Mutex<Crossfade>,
     /// Last state produced by the pump; read by any thread without mpv calls.
     state: Mutex<PlayerState>,
     tracks: Mutex<Vec<Track>>,
@@ -303,6 +350,7 @@ impl Player {
     pub fn start(options: &Options, sink: StateSink) -> Result<Arc<Self>, String> {
         let player = Arc::new(Self {
             engine: Mutex::new(Engine::empty()),
+            crossfade: Mutex::new(Crossfade::default()),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
@@ -322,6 +370,7 @@ impl Player {
                 eq: vec![0.0; EQ_BANDS.len()],
                 replaygain: ReplayGainMode::Track,
                 audio_device: options.audio_device.clone(),
+                prefetched: false,
             }),
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
@@ -388,6 +437,8 @@ impl Player {
         }
         *self.tracks.lock().unwrap() = tracks;
         *self.queue.lock().unwrap() = queue.start(index);
+        self.bump_queue_version();
+        self.push(Cmd::ClearPrefetch);
         self.bump_queue_version();
         self.push(Cmd::Load(index));
     }
@@ -503,6 +554,8 @@ impl Player {
         let next = self.queue.lock().unwrap().reorder(from, to);
         *self.queue.lock().unwrap() = next;
         self.bump_queue_version();
+        self.push(Cmd::ClearPrefetch);
+        self.bump_queue_version();
         self.push(Cmd::Refresh);
     }
 
@@ -531,6 +584,27 @@ impl Player {
     /// the current output untouched and is visible in the next state tick.
     pub fn set_audio_device(&self, name: &str) {
         self.push(Cmd::SetAudioDevice(name.to_string()));
+    }
+
+    /// Crossfade on/off and how long the overlap should be (issue #27).
+    ///
+    /// Off by default (design §4.2). Enabling it makes the pump prefetch the
+    /// next track into the second core during the last seconds of the current
+    /// one; stage 3 is what makes that prefetch audible.
+    pub fn set_crossfade(&self, crossfade: Crossfade) {
+        self.push(Cmd::SetCrossfade(crossfade));
+    }
+
+    /// The crossfade preferences currently in force.
+    pub fn crossfade(&self) -> Crossfade {
+        *self.crossfade.lock().unwrap()
+    }
+
+    /// Is a track waiting in the second core? Mirrors
+    /// [`PlayerState::prefetched`] for callers that want to know before the next
+    /// state tick arrives.
+    pub fn has_prefetched(&self) -> bool {
+        self.engine.lock().unwrap().has_idle()
     }
 
     /// Record that the queue order changed; the next emitted state carries a
@@ -567,6 +641,8 @@ impl Player {
             self.push(Cmd::Refresh);
         }
         self.bump_queue_version();
+        self.push(Cmd::ClearPrefetch);
+        self.bump_queue_version();
     }
 
     /// Empty the session queue and stop playback. Repeat and shuffle survive,
@@ -578,6 +654,7 @@ impl Player {
             tracks.clear();
             *q = q.cleared();
         }
+        self.push(Cmd::ClearPrefetch);
         self.bump_queue_version();
         self.push(Cmd::Stop);
     }
@@ -620,6 +697,12 @@ impl Player {
             }
         }
         self.stopped.store(true, Ordering::SeqCst);
+        // The pump is gone, so releasing a leftover prefetch core here is safe:
+        // `Mpv::drop` calls `mpv_terminate`, and with no pump left there is no
+        // other libmpv work it could race. While the pump is alive this must
+        // stay on its thread — hence `Cmd::ClearPrefetch` rather than a direct
+        // `take_idle` from a command thread.
+        drop(self.engine.lock().unwrap().take_idle());
     }
 
     /// Queue a command for the pump. Never touches the mpv handle: a
@@ -780,6 +863,15 @@ impl Player {
                 self.emit();
             }
             Cmd::Refresh => self.emit(),
+            Cmd::SetCrossfade(next) => {
+                *self.crossfade.lock().unwrap() = next;
+                // Turning crossfade off must not leave a prefetched core lying
+                // around: nothing would ever consume it.
+                if next.window().is_none() {
+                    self.clear_prefetch();
+                }
+            }
+            Cmd::ClearPrefetch => self.clear_prefetch(),
             // Both device commands run here because they read/set mpv
             // properties, and only the pump may touch libmpv.
             Cmd::ListDevices(reply) => {
@@ -874,7 +966,11 @@ impl Player {
                 Some(MpvEvent::FileLoaded) => player.emit(),
                 // EVENT_NONE = timeout: refresh state, but at most ~10 Hz.
                 None if last_tick.elapsed() >= TICK_EVERY => {
+                    // Emit, then consider prefetching (issue #27): doing it in
+                    // the same tick means the state the user sees and the
+                    // prefetch decision come from the same snapshot.
                     player.emit();
+                    player.maybe_prefetch();
                     last_tick = std::time::Instant::now();
                 }
                 _ => {}
@@ -914,11 +1010,99 @@ impl Player {
 
     /// Queue the next track; the pump loads it once back in its command
     /// drain (the only place safe for synchronous mpv calls).
+    ///
+    /// A prefetched track is dropped here: the track that was loaded into the
+    /// second core is no longer the one that plays next, and a stale prefetch
+    /// is exactly what stage 3 must never fade into.
     fn advance_to(&self, index: usize) {
         if self.cancelled.load(Ordering::SeqCst) {
             return;
         }
         self.commands.lock().unwrap().push_back(Cmd::Load(index));
+    }
+
+    /// Drop the prefetched track and stop its core. Pump thread only (libmpv).
+    fn clear_prefetch(&self) {
+        let taken = self.engine.lock().unwrap().take_idle();
+        if let Some(core) = taken {
+            let _ = core.command(&["stop"]);
+        }
+    }
+
+    /// Load the next track into the second core, paused, when the current one is
+    /// close enough to its end for a fade to start (pump thread only).
+    ///
+    /// Deliberately makes **no sound**: the file is loaded paused, so this stage
+    /// is invisible apart from a second core existing. Everything that makes a
+    /// prefetch audible is stage 3.
+    fn maybe_prefetch(&self) {
+        let Some(window) = self.crossfade.lock().unwrap().window() else {
+            return; // crossfade off
+        };
+        if self.engine.lock().unwrap().has_idle() {
+            return; // already waiting
+        }
+
+        // One critical section (queue → tracks, the order used elsewhere) so the
+        // decision and the path cannot come from two different queue states.
+        let next = {
+            let q = self.queue.lock().unwrap();
+            let tracks = self.tracks.lock().unwrap();
+            let Some(after) = q.after_end() else {
+                return; // nothing follows
+            };
+            if Some(after) == q.current() {
+                return; // repeat-one: the same track, nothing to prefetch
+            }
+            tracks.get(after).map(|t| t.path.clone())
+        };
+        let Some(path) = next else { return };
+
+        // Only prefetch when the current track really is about to end.
+        let s = self.snapshot();
+        if s.duration <= 0.0 {
+            return; // unknown length (a stream): no fade window to aim at
+        }
+        if s.duration - s.position > window {
+            return;
+        }
+
+        let Some(core) = self.engine.lock().unwrap().ensure_idle() else {
+            return; // no second core available
+        };
+
+        // The incoming track must sound like the rest of the album: same EQ
+        // chain, same ReplayGain mode. Both are applied before the file loads,
+        // so the very first frame is already filtered (stage 3 un-pauses it).
+        let chain = {
+            let eq = self.eq.lock().unwrap();
+            let gains = eq.gains.clone();
+            eq_af_chain(eq.preamp, &gains)
+        };
+        match &chain {
+            Some(af) => {
+                let _ = core.command(&["set", "af", af]);
+            }
+            None => {
+                let _ = core.command(&["set", "af", ""]);
+            }
+        }
+        let replaygain = *self.replaygain.lock().unwrap();
+        let _ = core.command(&["set", "replaygain", replaygain.as_mpv()]);
+
+        if core.command(&["loadfile", &path]).is_err() {
+            self.clear_prefetch();
+            return;
+        }
+        // Paused is the whole guarantee of this stage.
+        let _ = core.command(&["set", "pause", "yes"]);
+
+        self.engine.lock().unwrap().set_idle_af(chain);
+        iwaks_log::line(
+            iwaks_log::Level::Debug,
+            &format!("prefetched the next track ({window:.1}s window)"),
+        );
+        self.emit();
     }
 
     fn emit(&self) {
@@ -978,6 +1162,7 @@ impl Player {
             eq,
             replaygain,
             audio_device: api.get_string("audio-device").unwrap_or_default(),
+            prefetched: self.engine.lock().unwrap().has_idle(),
         }
     }
 }
@@ -1007,6 +1192,7 @@ mod tests {
     fn bare_player(thread: Option<JoinHandle<()>>, pump_thread: Option<ThreadId>) -> Player {
         Player {
             engine: Mutex::new(Engine::empty()),
+            crossfade: Mutex::new(Crossfade::default()),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
@@ -1026,7 +1212,9 @@ mod tests {
                 eq: vec![0.0; EQ_BANDS.len()],
                 replaygain: ReplayGainMode::Track,
                 audio_device: String::new(),
+                prefetched: false,
             }),
+
             tracks: Mutex::new(Vec::new()),
             queue: Mutex::new(Queue::new(0)),
             sink: Mutex::new(None),
@@ -1926,6 +2114,180 @@ mod tests {
             }]
         );
         assert!(serde_json::from_str::<Vec<AudioDevice>>("not json").is_err());
+    }
+
+    // ---- crossfade prefetch (issue #27, stage 2) ----
+
+    /// Two 2-second tracks: with a 3 s crossfade the whole of track A sits
+    /// inside the fade window, so a prefetch is due as soon as A has a
+    /// duration. The dir is returned so it outlives the test.
+    fn crossfade_fixture(name: &str) -> (PathBuf, Vec<Track>) {
+        let dir = test_dir(name);
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        write_wav(&a, 2.0);
+        write_wav(&b, 2.0);
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 2.0),
+            track(b.to_str().unwrap(), "B", 2.0),
+        ];
+        (dir, tracks)
+    }
+
+    #[test]
+    fn crossfade_is_off_by_default_so_nothing_is_prefetched() {
+        if !have_libmpv() {
+            return;
+        }
+        assert!(
+            !Crossfade::default().enabled,
+            "design 4.2: crossfade is opt-in"
+        );
+        let (_dirs, tracks) = crossfade_fixture("xf-off");
+        let player = start_player();
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| s.current.is_some()).expect("starts playing");
+
+        // The fixture is short enough that A is already inside a 3 s window; with
+        // crossfade off that must still never prefetch. A negative assertion
+        // needs a bounded wait, so give the pump several of its ticks.
+        std::thread::sleep(Duration::from_millis(700));
+        assert!(!player.has_prefetched(), "nothing prefetched while off");
+        assert!(!player.snapshot().prefetched);
+        player.shutdown();
+    }
+
+    #[test]
+    fn enabling_crossfade_prefetches_the_next_track_without_playing_it() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-prefetch");
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+
+        let state = wait_for(&player, Duration::from_secs(5), |s| s.prefetched)
+            .expect("the next track gets prefetched inside the window");
+        // The whole point of this stage: prefetching is silent.
+        assert_eq!(
+            state.current.as_ref().map(|t| t.title.as_str()),
+            Some("A"),
+            "prefetching must not change what is playing"
+        );
+        assert_eq!(state.index, Some(0), "and must not advance the queue");
+        player.shutdown();
+    }
+
+    #[test]
+    fn a_prefetched_core_is_given_the_current_eq() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-eq");
+        let player = start_player();
+        // A real (non-flat) curve, so "same EQ as the audible core" is a
+        // statement about content rather than two empty strings.
+        let gains = vec![4.0, 3.0, 1.0, -1.0, -2.0, -1.0, 1.0, 3.0, 4.0, 4.0];
+        player.set_eq(-2.0, gains.clone());
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+
+        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+        let applied = player
+            .engine
+            .lock()
+            .unwrap()
+            .idle_af()
+            .expect("a prefetched core has an af chain")
+            .to_string();
+        assert_eq!(
+            applied,
+            eq_af_chain(-2.0, &gains).expect("the chain we asked for"),
+            "the incoming track is filtered exactly like the current one"
+        );
+        player.shutdown();
+    }
+
+    #[test]
+    fn changing_the_queue_drops_a_prefetched_track() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-drop");
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks.clone(), 0);
+        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+
+        // A stale prefetch is the one thing stage 3 must never fade into.
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| !s.prefetched)
+            .expect("a new list drops the prefetched track");
+        player.shutdown();
+    }
+
+    #[test]
+    fn turning_crossfade_off_releases_the_prefetched_core() {
+        if !have_libmpv() {
+            return;
+        }
+        let (_dirs, tracks) = crossfade_fixture("xf-turn-off");
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| s.prefetched).expect("prefetched");
+
+        player.set_crossfade(Crossfade {
+            enabled: false,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        wait_for(&player, Duration::from_secs(5), |s| !s.prefetched)
+            .expect("switching crossfade off leaves no core behind");
+        player.shutdown();
+    }
+
+    #[test]
+    fn crossfade_preferences_are_validated() {
+        // Pure logic, no libmpv.
+        assert_eq!(Crossfade::default().window(), None, "off means no window");
+        let on = Crossfade {
+            enabled: true,
+            seconds: 3.0,
+        };
+        assert_eq!(on.window(), Some(3.0));
+        // A silly or broken duration still produces a usable window rather than
+        // a negative one (which would prefetch after the track had ended).
+        assert_eq!(
+            Crossfade {
+                enabled: true,
+                seconds: -5.0
+            }
+            .window(),
+            Some(MIN_CROSSFADE_SECONDS)
+        );
+        assert_eq!(
+            Crossfade {
+                enabled: true,
+                seconds: f64::NAN
+            }
+            .window(),
+            None,
+            "NaN is not a duration"
+        );
+        assert_eq!(DEFAULT_CROSSFADE_SECONDS, 3.0, "the plan's D1 value");
     }
 
     #[test]

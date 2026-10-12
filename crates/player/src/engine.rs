@@ -24,6 +24,12 @@ pub struct Engine {
     cores: [Option<Arc<Mpv>>; CORES],
     /// Index of the audible core.
     active: usize,
+    /// Startup options, kept so a second core is created exactly like the first.
+    options: Options,
+    /// The `af` chain applied to the idle core. Tracked because the user's EQ
+    /// can change *while* a track is prefetched, and the incoming core has to be
+    /// brought up to date before it is allowed to play (stage 3).
+    idle_af: Option<String>,
 }
 
 impl Default for Engine {
@@ -38,6 +44,8 @@ impl Engine {
         Self {
             cores: [None, None],
             active: 0,
+            options: Options::default(),
+            idle_af: None,
         }
     }
 
@@ -49,12 +57,58 @@ impl Engine {
         assert!(slot < CORES, "core slot out of range");
         let api = setup_core(options)?;
         self.cores[slot] = Some(api);
+        if slot == self.active {
+            self.options = options.clone();
+        }
         Ok(self.cores[slot].clone().expect("just stored"))
     }
 
     /// Initialise the audible core (slot 0). The usual entry point.
     pub fn init_primary(&mut self, options: &Options) -> Result<Arc<Mpv>, String> {
         self.init_core(0, options)
+    }
+
+    /// Create the idle core if it does not exist yet, and return it. `None` when
+    /// libmpv refuses a second core — the caller then simply prefetches nothing.
+    pub fn ensure_idle(&mut self) -> Option<Arc<Mpv>> {
+        if let Some(existing) = self.idle() {
+            return Some(existing);
+        }
+        let options = self.options.clone();
+        let slot = self.idle_slot();
+        match self.init_core(slot, &options) {
+            Ok(api) => Some(api),
+            Err(e) => {
+                iwaks_log::line(
+                    iwaks_log::Level::Warn,
+                    &format!("could not create the second playback core ({e})"),
+                );
+                None
+            }
+        }
+    }
+
+    /// Remove the idle core and hand it back so the caller can stop it with
+    /// libmpv (pump-thread work). Dropping the returned handle releases it.
+    pub fn take_idle(&mut self) -> Option<Arc<Mpv>> {
+        let taken = self.cores[self.idle_slot()].take();
+        self.idle_af = None;
+        taken
+    }
+
+    /// Is a second core loaded and ready?
+    pub fn has_idle(&self) -> bool {
+        self.cores[self.idle_slot()].is_some()
+    }
+
+    /// The `af` chain the idle core was given, if any.
+    pub fn idle_af(&self) -> Option<&str> {
+        self.idle_af.as_deref()
+    }
+
+    /// Record the `af` chain the idle core was given.
+    pub fn set_idle_af(&mut self, chain: Option<String>) {
+        self.idle_af = chain;
     }
 
     /// The core that plays.

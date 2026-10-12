@@ -73,6 +73,8 @@ export interface PlayerState {
   replaygain: ReplayGainMode;
   /** Active mpv `audio-device` (empty = system default). */
   audioDevice: string;
+  /** True while the next track sits loaded and paused in the second core. */
+  prefetched: boolean;
 }
 
 /** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */
