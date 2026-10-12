@@ -73,11 +73,43 @@ Each stage is its own commit and each leaves the app working.
   consistent (one current track, correct `index`, `list_len`)
 
 ### Stage 4 — setting, UI, persistence
-- `audio.crossfade_seconds` setting (0 = off, default off per design §4.2) with a
-  duration control in Settings → Audio output
+- **Two settings, not one.** `design.md` §4.2 says "toggle, default off", so
+  "enabled" and "how long" are separate concerns — a single `seconds = 0`
+  sentinel would also mean "off", making a 1 s crossfade impossible to express:
+
+  | Setting | Type | Default |
+  |---------|------|---------|
+  | `audio.crossfade` | bool | **off** |
+  | `audio.crossfade_seconds` | f64, 1.0–10.0 | **3.0** |
+
+  Three seconds is the default because the feature ships **off**, so the default
+  only matters for the first seconds after someone enables it — which makes it
+  cheap to be wrong. 3 s is also the safe ceiling for a mixed library: a longer
+  fade swallows whole tracks whose intros are short. The range starts at 1 s
+  because below that it sounds like a glitch, not a fade.
 - Session persistence records the active track as before; a restore never
   prefetches across the boundary
-- **DoD:** the choice survives a restart; default is off
+- **DoD:** the choice survives a restart; default is off; a 1 s crossfade is
+  selectable (the two-setting split above is what makes that possible)
+
+## Decisions
+
+**D1 — default 3 s, range 1–10 s, split into an enable flag and a duration.**
+(Decided.) See Stage 4.
+
+**D2 — the crossfade ↔ gapless trade-off belongs in the control's own note, not
+in a modal.** (Proposed, not yet implemented.) `design.md` §4.2 promises gapless;
+crossfade cannot keep it, and that has to be stated where the user turns the
+feature on. The app already has this pattern — the Exclusive mode switch
+explains its cost in the same place — so this should be one sentence in
+`.set-note`, not a dialog:
+
+> Overlaps the end of one song with the start of the next. Sample-accurate
+> transitions are given up while it is on — tracks are no longer gapless — and
+> exclusive output is unavailable, so the two can't be combined.
+
+**D3 — whether Stage 1 alone is worth landing** if the rest is deferred. (Open.)
+It is a pure refactor that removes the last place "one mpv" is assumed.
 
 ## Risks, and what is done about each
 
@@ -108,15 +140,12 @@ Each stage is its own commit and each leaves the app working.
 
 ## Open decisions for the reviewer
 
-1. **Default duration.** 3 s is the common choice; 5 s suits long-form mixes.
-   Proposed: 3 s, adjustable 0.5–10 s.
-2. **Gapless vs crossfade are mutually exclusive by nature** — overlapping cores
-   cannot be sample-accurate with the incoming track's first sample, so
-   enabling crossfade gives up mpv's gapless playback. This should be stated in
-   the UI, not just in this file.
-3. **Whether Stage 1 alone is worth landing** if the rest is deferred: it is a
-   pure refactor that removes the last place where "one mpv" is assumed, and it
-   makes the audio output issue (#23) and future work easier.
+1. ~~Default duration~~ — **decided**: 3 s, range 1–10 s, and a separate enable
+   flag (see D1).
+2. ~~Whether the gapless trade-off is surfaced in the UI~~ — **proposed**: yes, one
+   sentence in the control's note (see D2). Not implemented yet; Stage 1 touches
+   no UI.
+3. ~~Whether Stage 1 alone is worth landing~~ — **still open** (see D3).
 
 ## References
 
