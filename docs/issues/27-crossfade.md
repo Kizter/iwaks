@@ -47,12 +47,38 @@ changes is that `api: Mutex<Option<Arc<Mpv>>>` becomes two cores plus an
 
 Each stage is its own commit and each leaves the app working.
 
-### Stage 1 — `Engine`: two cores, one thread, no behaviour change
-- New `crates/player/src/engine.rs` owning `corem: [Option<Arc<Mpv>>; 2]` + `active`
-- `Player.api` calls become `self.engine.active()` / `.idle()`
+### Stage 1 — `Engine`: two cores, one thread, no behaviour change — **done**
+- New `crates/player/src/engine.rs` owning `cores: [Option<Arc<Mpv>>; 2]` + `active`
+- `Player.api` calls become `self.engine.lock().active()`
 - Same startup options applied to both cores (`ao`, `audio-exclusive`,
   `audio-client-name`, `volume-max`, `gapless-audio`, replaygain, `af` EQ)
 - **DoD:** all 54 existing player tests pass unchanged; no user-visible change
+
+**Outcome.** Landed as a pure refactor: `crates/player/src/engine.rs` holds the
+slots and the per-core startup setup (moved out of `Player::setup_mpv`, which no
+longer exists), and `Player` keeps a `Mutex<Engine>`. Only the *primary* core is
+created — the second slot stays empty until a prefetch needs it, so this stage
+costs no extra audio memory and cannot change what the user hears.
+
+- The **pump still takes its `Arc<Mpv>` directly**, so the hot loop is unchanged;
+  the engine is only consulted where a second core would be needed. That keeps
+  the diff reviewable: 20 lines added, 61 removed in `player.rs`, and no command,
+  state field or frontend type moved.
+- The pump thread constructs the `Engine` and installs it with one
+  `*engine.lock() = engine` before `ready_tx.send(Ok(()))`, keeping the same
+  guarantee the old single handle had: after `Player::start` returns `Ok`, every
+  other thread can reach the core.
+- `ReplayGainMode::as_mpv` had to become `pub(crate)` — the setup now lives in a
+  sibling module, and the mpv spelling stays private to the crate.
+- 4 new unit tests for the pure slot logic (empty engine, swap, idle ≠ active,
+  `Default`). They need no libmpv DLL, which is why they can run in CI; `Mpv` is
+  neither `Debug` nor `PartialEq`, so presence is asserted with `is_none`/
+  `is_some` rather than `assert_eq!`.
+- `Player::idle_api()` was written and then removed: it had no caller until
+  Stage 2, and stage 1 is not the place for speculative code.
+
+Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 316 passed
+(54 existing player tests unchanged + 4 engine tests), 5 ignored live.
 
 ### Stage 2 — prefetch
 - When the active track's remaining time ≤ fade duration, `loadfile` the next
@@ -124,7 +150,7 @@ It is a pure refactor that removes the last place "one mpv" is assumed.
 
 ## Acceptance criteria
 
-- [ ] Stage 1 lands with all existing tests green and no behaviour change
+- [x] Stage 1 lands with all existing tests green and no behaviour change
 - [ ] Prefetch never plays without being asked, and always with the current EQ
 - [ ] A completed crossfade reports the new track, correct index and position
 - [ ] Transport commands during a fade never leave both cores audible

@@ -4,9 +4,11 @@
 //! `libmpv-2.dll` next to the executable, or set `IWAKS_LIBMPV`). Builds and
 //! unit tests compile without the DLL — playback tests skip when absent.
 
+pub mod engine;
 pub mod ffi;
 pub mod player;
 pub mod queue;
 
+pub use engine::Engine;
 pub use player::{AudioDevice, Options, Player, PlayerState, ReplayGainMode};
 pub use queue::RepeatMode;

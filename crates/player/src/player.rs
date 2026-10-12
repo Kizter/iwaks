@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 use iwaks_core::track::Track;
 use serde::Serialize;
 
+use crate::engine::Engine;
 use crate::ffi::{EndFileReason, Mpv, MpvEvent};
 use crate::queue::{Queue, RepeatMode};
 
@@ -123,7 +124,7 @@ pub enum ReplayGainMode {
 }
 
 impl ReplayGainMode {
-    fn as_mpv(self) -> &'static str {
+    pub(crate) fn as_mpv(self) -> &'static str {
         match self {
             Self::Track => "track",
             Self::Album => "album",
@@ -220,11 +221,12 @@ enum Cmd {
 }
 
 pub struct Player {
-    /// Owned by the pump thread exclusively: mpv is created, initialized and
-    /// driven only on the pump thread. Stored behind a mutex solely for Arc
-    /// lifetime sharing with `shutdown`-adjacent cleanup — no other thread
-    /// ever issues an mpv call, so no cross-thread wakeup is needed.
-    api: Mutex<Option<Arc<Mpv>>>,
+    /// The session's libmpv cores (issue #27 stage 1: one audible core now, a
+    /// prefetch slot to come). Created, initialised and driven only on the pump
+    /// thread. Stored behind a mutex solely for Arc lifetime sharing with
+    /// `shutdown`-adjacent cleanup — no other thread ever issues an mpv call,
+    /// so no cross-thread wakeup is needed.
+    engine: Mutex<Engine>,
     /// Last state produced by the pump; read by any thread without mpv calls.
     state: Mutex<PlayerState>,
     tracks: Mutex<Vec<Track>>,
@@ -300,7 +302,7 @@ impl Player {
     /// until mpv is initialized (or initialization failed).
     pub fn start(options: &Options, sink: StateSink) -> Result<Arc<Self>, String> {
         let player = Arc::new(Self {
-            api: Mutex::new(None),
+            engine: Mutex::new(Engine::empty()),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
@@ -341,10 +343,10 @@ impl Player {
         let (ready_tx, ready_rx) = mpsc::channel();
         let pump_player = Arc::clone(&player);
         let handle = std::thread::spawn(move || {
-            let setup = Self::setup_mpv(&options);
-            match setup {
+            let mut engine = Engine::empty();
+            match engine.init_primary(&options) {
                 Ok(api) => {
-                    *pump_player.api.lock().unwrap() = Some(Arc::clone(&api));
+                    *pump_player.engine.lock().unwrap() = engine;
                     let _ = ready_tx.send(Ok(()));
                     Self::pump(&pump_player, api);
                 }
@@ -365,47 +367,6 @@ impl Player {
                 Err("player init timed out".into())
             }
         }
-    }
-
-    /// Run on the pump thread: create mpv, apply options, initialize.
-    fn setup_mpv(options: &Options) -> Result<Arc<Mpv>, String> {
-        let api = Mpv::new()?;
-        let apply = |key: &str, value: &str| -> Result<(), String> {
-            api.set_option(key, value)
-                .map_err(|code| format!("option {key}={value}: {code}"))
-        };
-        apply("idle", "yes")?; // stay alive between files
-        apply("vo", "null")?; // headless app: no window
-        apply("ao", if options.ao_null { "null" } else { "wasapi" })?;
-        if options.ao_null {
-            // Real-time pacing so position/seek assertions are deterministic.
-            apply("ao-null-untimed", "no")?;
-        }
-        if options.audio_exclusive {
-            apply("audio-exclusive", "yes")?;
-        }
-        if !options.ao_null && !options.audio_device.is_empty() {
-            // Startup device choice (issue #23); "auto" when nothing is stored.
-            apply("audio-device", &options.audio_device)?;
-        }
-        apply("audio-client-name", "Iwaks")?;
-        apply("volume-max", "100")?;
-        apply("keep-open", "no")?;
-        apply("gapless-audio", "yes")?;
-        // ReplayGain on by default (design §4.2: `replaygain=track`); the mode
-        // is switchable at runtime (`set replaygain <mode>`), read back each
-        // tick, and applied from the next loaded file onward.
-        apply("replaygain", ReplayGainMode::Track.as_mpv())?;
-        apply("replaygain-preamp", "0")?;
-        apply("replaygain-clip", "yes")?;
-        apply("replaygain-fallback", "0")?;
-        let _ = api.set_option("audio-resampler", "soxr"); // optional build; harmless
-        if let Ok(level) = std::env::var("IWAKS_MPV_LOG") {
-            let _ = api.request_log_messages(&level); // debug hook
-        }
-        api.initialize()
-            .map_err(|code| format!("mpv_initialize failed: {code}"))?;
-        Ok(Arc::new(api))
     }
 
     /// Replace the queue and start playing `tracks[index]`.
@@ -702,16 +663,12 @@ impl Player {
 
     // ---- pump side (only the pump thread runs these) ----
 
-    /// Clone the libmpv handle, releasing the lock. Synchronous mpv calls
-    /// must run without holding the mutex: a pump thread blocked inside a
-    /// call must not stall `push`/`snapshot`/`shutdown` on other threads.
+    /// Clone the playing core's handle, releasing the lock. Synchronous mpv
+    /// calls must run without holding the engine mutex: a pump thread blocked
+    /// inside a call must not stall `push`/`snapshot`/`shutdown` on other
+    /// threads.
     fn api(&self) -> Arc<Mpv> {
-        self.api
-            .lock()
-            .unwrap()
-            .as_ref()
-            .expect("player not started")
-            .clone()
+        self.engine.lock().unwrap().active()
     }
 
     fn run_cmd(&self, cmd: Cmd) {
@@ -1049,7 +1006,7 @@ mod tests {
     /// without a working audio backend.
     fn bare_player(thread: Option<JoinHandle<()>>, pump_thread: Option<ThreadId>) -> Player {
         Player {
-            api: Mutex::new(None),
+            engine: Mutex::new(Engine::empty()),
             state: Mutex::new(PlayerState {
                 current: None,
                 index: None,
