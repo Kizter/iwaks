@@ -56,13 +56,36 @@ it without a system-level default-device dance.
 - **Persistence** — the choice is stored as `audio.device` and read back into
   `PlayerOptions` at startup, next to the existing exclusive flag.
 
-3 new player tests: enumeration answers twice, a selected device shows up in
-the published state while a bogus one does not, the system-default choice never
-wedges the thread, and the JSON contract of the property.
+3 new player tests: enumeration answers twice and stays consistent, the JSON
+contract of the property, and the device-switch pair below.
+
+**CI caught a crash these tests could not.** The first version of the switch test
+fed libmpv a fabricated device name (`iwaks-not-a-real-device`) to prove that a
+rejected switch does not stick. That passes on a dev machine with an audio
+device — and killed the CI binary with `STATUS_ACCESS_VIOLATION`
+(`0xc0000005`) on a runner with no audio endpoint, because `set audio-device`
+makes libmpv re-open an output that cannot exist. A native crash cannot be caught
+from Rust, so the whole test binary died and the build went red from this commit
+onward.
+
+The fix is not "handle the error" but "do not do that":
+
+- Tests now only ever send a name **mpv itself reported**, via
+  `first_selectable_device`, which prints a `SKIP:` line when there is none.
+- The two tests that actually switch output are `#[ignore]`d, matching the
+  existing pattern in `crates/cover/tests/live.rs` for tests that need the real
+  environment. They still exist and can be run by hand:
+  `cargo test -p iwaks-player -- --ignored`.
+- The read path stays in CI: `list_devices` answering, twice, without hanging,
+  plus the offline JSON contract. That is the part this crate owns; whether the
+  OS opens the device it names is not.
+
+With `ao=null` (how every player test starts) mpv reports a single `auto`
+entry, which is why the crash needed a *fabricated* name to trigger locally.
 
 `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`, and
-`cargo test --workspace` (312 passed, 5 ignored live) are green, as are
-`npx tsc --noEmit` and `npm run build`.
+`cargo test --workspace` (314 passed, 7 ignored: 5 live cover + 2 audio-device)
+are green, as are `npx tsc --noEmit` and `npm run build`.
 
 ## References
 
