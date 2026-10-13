@@ -132,10 +132,14 @@ pub const MAX_CROSSFADE_SECONDS: f64 = 10.0;
 ///
 /// Two settings rather than one sentinel: `seconds = 0` has to stay a legal
 /// (if silly) duration, so "off" needs its own flag.
+///
+/// The overlap is clamped the same way every other reader does it: the row is
+/// plain text a user can hand-edit, and an unclamped value would reach libmpv
+/// as a fade window (code-review #30).
 fn stored_crossfade(db_path: &Path) -> Crossfade {
     let seconds = read_setting(db_path, SETTING_CROSSFADE_SECONDS)
         .and_then(|raw| raw.parse::<f64>().ok())
-        .filter(|s| s.is_finite())
+        .map(clamp_crossfade_seconds)
         .unwrap_or(DEFAULT_CROSSFADE_SECONDS);
     Crossfade {
         enabled: read_setting(db_path, SETTING_CROSSFADE).as_deref() == Some("true"),
@@ -217,14 +221,19 @@ fn list_audio_devices(state: State<'_, AppState>) -> Result<Vec<AudioDevice>, St
 /// Pick the output device; an empty `name` means "system default".
 ///
 /// Stored so the choice survives a restart, and applied immediately so the user
-/// hears the switch without replaying anything.
+/// hears the switch without replaying anything. Stored first, applied second —
+/// the same order `set_crossfade` uses: a write that fails must not leave the
+/// session and the UI disagreeing about the device that is actually playing,
+/// and the frontend rolls the switch back when the command rejects.
 #[tauri::command]
 fn set_audio_device(name: String, state: State<'_, AppState>) -> Result<(), String> {
-    let p = player(&state).ok_or_else(|| PLAYER_UNAVAILABLE.to_string())?;
-    p.set_audio_device(&name);
     open_lib(&state)?
         .set_setting(SETTING_AUDIO_DEVICE, &name)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(p) = player(&state) {
+        p.set_audio_device(&name);
+    }
+    Ok(())
 }
 
 /// The stored device name (`""` = system default).
@@ -328,6 +337,49 @@ mod tests {
                 "{bad} is not a duration anyone can mean"
             );
         }
+    }
+
+    /// The startup reader is the third path a stored overlap can take (after
+    /// `get_crossfade` and `set_crossfade`) — without the clamp here a
+    /// hand-edited 600s row would reach the pump as a fade window (issue #27
+    /// says the read is clamped; code-review #30 found it was not).
+    #[test]
+    fn the_startup_crossfade_reader_clamps_a_hand_edited_row() {
+        let dir = std::env::temp_dir().join(format!("iwaks-lib-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = dir.join("settings.sqlite");
+        let _ = std::fs::remove_file(&db);
+        let lib = Library::open(&db.to_string_lossy()).expect("a fresh library opens");
+        lib.set_setting(SETTING_CROSSFADE_SECONDS, "600")
+            .expect("hand-edited style row writes");
+        lib.set_setting(SETTING_CROSSFADE, "true").unwrap();
+        drop(lib);
+
+        let crossfade = stored_crossfade(&db);
+        assert!(crossfade.enabled, "the on/off flag passes through");
+        assert_eq!(
+            crossfade.seconds, MAX_CROSSFADE_SECONDS,
+            "600s clamps down to the UI maximum"
+        );
+
+        let lib = Library::open(&db.to_string_lossy()).unwrap();
+        lib.set_setting(SETTING_CROSSFADE_SECONDS, "0.2").unwrap();
+        drop(lib);
+        assert_eq!(
+            stored_crossfade(&db).seconds,
+            MIN_CROSSFADE_SECONDS,
+            "0.2s clamps up to the UI minimum"
+        );
+
+        let lib = Library::open(&db.to_string_lossy()).unwrap();
+        lib.set_setting(SETTING_CROSSFADE_SECONDS, "not-a-duration")
+            .unwrap();
+        drop(lib);
+        assert_eq!(
+            stored_crossfade(&db).seconds,
+            DEFAULT_CROSSFADE_SECONDS,
+            "an unreadable row falls back to the default"
+        );
     }
 }
 

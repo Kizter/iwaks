@@ -1159,6 +1159,16 @@ impl Player {
                         self.finish_fade();
                         return;
                     }
+                    // The fade-in track ended (or failed to demux) before the
+                    // ramp handed over: adopting a finished core would play
+                    // silence with no auto-advance (code-review #30). Drop the
+                    // ramp — the outgoing track is still playing, and its own
+                    // EOF advances the queue normally.
+                    if slot == fade.incoming && !fade.swapped {
+                        self.abandon_fade();
+                        self.emit();
+                        return;
+                    }
                 }
                 if slot == self.engine.lock().unwrap().active_slot() {
                     self.on_end_file(reason);
@@ -1292,6 +1302,19 @@ impl Player {
         if self.fade.lock().unwrap().is_some() {
             return; // one ramp at a time; the free slot is spoken for
         }
+        // The overlap must never outlive the track being faded in: a track
+        // shorter than half the window would hit its EOF before the ramp's
+        // midpoint, and adopting an ended core plays silence (code-review #30).
+        // mpv fills `duration` for a freshly loaded core asynchronously, so an
+        // unknown length still fades — the EOF safety net in `handle_event`
+        // catches a race there instead of refusing to fade at all.
+        let incoming_duration = incoming.get_double("duration").unwrap_or(f64::NAN);
+        if incoming_duration.is_finite() && incoming_duration > 0.0 {
+            let window = window.min(incoming_duration / 2.0);
+            if window < MIN_CROSSFADE_SECONDS {
+                return; // too short to crossfade into: the next start is a plain cut
+            }
+        }
         let outgoing_slot = self.engine.lock().unwrap().active_slot();
 
         // The incoming core starts silent, then ramps up; the outgoing one is
@@ -1404,6 +1427,14 @@ impl Player {
         }
         self.apply_volume_to_audible();
         self.emit();
+        // The next-next track is prefetched while this ramp is still draining
+        // (issue #27's third core), but `start_fade` refuses to run two ramps
+        // at once — code-review #30 — and the held core would sit parked,
+        // read as "already waiting", killing the next fade. Re-decide now the
+        // ramp is over: drop the held core and let the prefetch logic start
+        // the next fade fresh against this track's remaining time.
+        self.clear_prefetch();
+        self.maybe_prefetch();
     }
 
     /// Abandon a fade without a handover — anything that changes what is playing
@@ -2951,6 +2982,93 @@ mod tests {
             Some("A"),
             "and the queue has not moved on"
         );
+        player.shutdown();
+    }
+
+    #[test]
+    fn a_short_next_track_never_plays_silence() {
+        // Regression for code-review #30: the fade window is clamped against the
+        // incoming track's own length, so a next track shorter than half the
+        // window is a plain cut, not a ramp into a dead core. Before the clamp
+        // the ramp un-paused it, its EOF landed before the midpoint and was
+        // dropped, and the handover adopted a finished core: index 1, position
+        // 0, no auto-advance — silence.
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("xf-short-incoming");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        write_wav(&a, 6.0);
+        write_wav(&b, 0.9); // shorter than half the 3 s window
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 6.0),
+            track(b.to_str().unwrap(), "B", 0.9),
+        ];
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+
+        // B must actually play — its position has to advance — and the queue
+        // must move past it instead of hanging on a taken-over, ended core.
+        wait_for(&player, Duration::from_secs(12), |s| {
+            s.index == Some(1) && s.position > 0.3
+        })
+        .expect("the short next track plays out rather than stalling");
+        wait_for(&player, Duration::from_secs(8), |s| s.stopped)
+            .expect("the queue finishes instead of hanging on silence");
+        player.shutdown();
+    }
+
+    #[test]
+    fn a_short_middle_track_rearms_the_next_crossfade() {
+        // Regression for code-review #30: the next-next track is prefetched
+        // while the previous ramp is still draining (issue #27's third core),
+        // which `start_fade` refuses ("one ramp at a time"), leaving that core
+        // parked. `finish_fade` now drops the parked core and re-decides, so
+        // the short middle track still fades into what follows instead of a
+        // hard cut with crossfade left wedged.
+        if !have_libmpv() {
+            return;
+        }
+        let dir = test_dir("xf-short-middle");
+        let a = dir.join("a.wav");
+        let b = dir.join("b.wav");
+        let c = dir.join("c.wav");
+        write_wav(&a, 6.0);
+        write_wav(&b, 4.0); // short enough that C is prefetched mid-ramp-A→B
+        write_wav(&c, 6.0);
+        let tracks = vec![
+            track(a.to_str().unwrap(), "A", 6.0),
+            track(b.to_str().unwrap(), "B", 4.0),
+            track(c.to_str().unwrap(), "C", 6.0),
+        ];
+        let player = start_player();
+        player.set_crossfade(Crossfade {
+            enabled: true,
+            seconds: DEFAULT_CROSSFADE_SECONDS,
+        });
+        player.play_tracks(tracks, 0);
+
+        // B is current and has played past where A's ramp could possibly still
+        // be draining (it ends ≤ 2 s of window after B takes over, clamped to
+        // B's own length). If the next ramp did not re-arm, this is the exact
+        // pause where the third core sits parked doing nothing.
+        wait_for(&player, Duration::from_secs(12), |s| {
+            s.index == Some(1) && s.position > 1.6
+        })
+        .expect("B is past A's ramp");
+        assert!(
+            player.engine.lock().unwrap().is_fading(),
+            "the fade into C is re-armed, not killed by the parked core"
+        );
+        wait_for(&player, Duration::from_secs(10), |s| {
+            s.current.as_ref().map(|t| t.title.as_str()) == Some("C")
+        })
+        .expect("C takes over from B");
         player.shutdown();
     }
 
