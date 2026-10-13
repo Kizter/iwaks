@@ -20,6 +20,13 @@
   --radius-pill: 999px;
   --radius-circle: 50%;
 
+  /* List column tracks (issue #05). A header and its rows are the same table,
+     so they read the same declaration: writing the tracks twice is how "Time"
+     ended up 140px away from the durations, and how the Queue header drifted
+     to 3 columns while its rows had 4. `App.css.test.ts` guards this. */
+  --track-cols: 44px 1fr 128px;
+  --queue-cols: 28px 44px 1fr 240px;
+
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.5;
@@ -650,9 +657,13 @@ kbd {
 
 /* ---------- track list ---------- */
 
+.track-head,
+.track-row {
+  grid-template-columns: var(--track-cols);
+}
+
 .track-head {
   display: grid;
-  grid-template-columns: 44px 1fr 128px;
   gap: 12px;
   padding: 0 16px 8px;
   font-size: var(--font-xs);
@@ -753,7 +764,6 @@ kbd {
   top: 0;
   height: 56px;
   display: grid;
-  grid-template-columns: 44px 1fr 128px;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -2211,7 +2221,7 @@ input[type="range"]:disabled {
 .queue-head,
 .queue-row {
   /* position number — cover — main — meta(+now-playing, +handle) */
-  grid-template-columns: 28px 44px 1fr 240px;
+  grid-template-columns: var(--queue-cols);
   cursor: grab;
 }
 

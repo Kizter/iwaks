@@ -71,6 +71,7 @@ import {
 } from "@phosphor-icons/react";
 import type { Playlist, PlayerState, ScanProgress, Track, TrackFilter, TrackSort } from "./types";
 import iwaksMark from "./assets/iwaks-mark.png";
+import { NoResultsState, OnboardingState } from "./EmptyStates";
 
 const ROW_HEIGHT = 56;
 
@@ -2226,44 +2227,14 @@ function App() {
             onRemove={(position) => void onRemoveFromQueue(position)}
           />
         ) : noResults ? (
-          <div className="empty no-results">
-            <MagnifyingGlass className="empty-mark-icon" size={34} aria-hidden="true" />
-            <h2>
-              {hasQuery
-                ? `No results for “${query.trim()}”`
-                : "Nothing matches those filters"}
-            </h2>
-            <p>
-              {hasFilter
-                ? "No tracks in your library match this genre and year."
-                : "Check the spelling, or try a different song, artist, or album."}
-            </p>
-            <div className="empty-actions">
-              {hasQuery && (
-                <button className="btn-ghost" onClick={() => setQuery("")}>
-                  Clear search
-                </button>
-              )}
-              {hasFilter && (
-                <button className="btn-ghost" onClick={clearFilters}>
-                  Clear filters
-                </button>
-              )}
-            </div>
-          </div>
+          <NoResultsState
+            query={query}
+            filtered={hasFilter}
+            onClearQuery={() => setQuery("")}
+            onClearFilters={clearFilters}
+          />
         ) : isEmpty ? (
-          <div className="empty">
-            <img className="empty-mark" src={iwaksMark} alt="" />
-            <h2>{scanning ? "Building your library…" : "Your music lives here"}</h2>
-            <p>
-              {scanning
-                ? "Keep this window open while Iwaks finds your tracks."
-                : "Point Iwaks at a folder on this PC and it will scan hi-res & lossless formats."}
-            </p>
-            <button className="btn-primary" onClick={onScan} disabled={scanning}>
-              {scanning ? "Scanning…" : "Scan a folder"}
-            </button>
-          </div>
+          <OnboardingState scanning={scanning} onScan={onScan} />
         ) : loadError || status === "error" ? (
           <div className="error-state">
             <h2>Couldn't load your library</h2>

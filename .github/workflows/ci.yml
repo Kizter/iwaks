@@ -28,6 +28,11 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # Runs before the Rust jobs in wall-clock terms because it is the fastest
+      # gate we have; `npm run build` above only type-checks and bundles.
+      - name: Frontend tests (vitest)
+        run: npm test
+
       - name: cargo fmt (workspace)
         run: cargo fmt --all -- --check
 

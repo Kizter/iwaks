@@ -1,6 +1,9 @@
 /** Format milliseconds as `m:ss` (0 → "0:00"). */
 export function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
+  // `Number.isFinite` first: `Math.max(0, NaN)` is NaN, which used to reach the
+  // template as the literal text "NaN:NaN" whenever a track's length was not
+  // known yet.
+  const total = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 

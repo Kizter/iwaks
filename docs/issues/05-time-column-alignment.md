@@ -35,9 +35,35 @@ matching row durations to the header. Small fix, high visibility.
 
 ## Definition of Done
 
-- [ ] "Time" header aligns with duration numbers at 900–1920 px widths
-- [ ] Queue header grid matches Queue rows
-- [ ] No regression to row rendering (position/cover/menu columns)
+- [x] "Time" header aligns with duration numbers at 900–1920 px widths
+- [x] Queue header grid matches Queue rows
+- [x] No regression to row rendering (position/cover/menu columns)
+
+## Outcome
+
+The fix itself landed with the issue; what changed afterwards is that it cannot
+regress silently. The column tracks moved into two custom properties —
+`--track-cols` and `--queue-cols` — and a header and its rows now read the same
+declaration instead of each carrying a literal. That was suggested direction #2
+("one shared definition so header and rows cannot drift apart"), and it is the
+part that matters.
+
+**The three boxes above were manual "look at it and confirm" items.** jsdom has
+no layout engine, so no unit test can measure where "Time" landed at 1440 px; a
+test claiming otherwise would be theatre. What *is* verifiable — and what caused
+the defect — is the invariant behind the pixels, so `src/App.css.test.ts` asserts
+it: both selectors resolve to the same token, the queue tracks are four columns
+wide with the duration in the last, `.queue-head-dur` is pinned to `grid-column:
+4` rather than auto-placed into `1fr`, and the headers reserve their hidden
+leading cell.
+
+Both defects were confirmed to fail the suite by re-introducing them on purpose:
+a three-column literal on the queue header, and (in the same file's palette
+guard) a colour literal smuggled into a component rule.
+
+The stylesheet parser in that test is brace-counting and comment-aware, because
+this file has 19 comments containing `{` or `}` — a naive regex pairs every
+selector with the wrong body and reports confident nonsense.
 
 ## References
 

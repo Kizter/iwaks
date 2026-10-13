@@ -30,6 +30,26 @@ pub const FORMAT_STRING: c_int = 1;
 pub const FORMAT_FLAG: c_int = 3;
 pub const FORMAT_INT64: c_int = 4;
 pub const FORMAT_DOUBLE: c_int = 5;
+/// The request format for "give me the property as an mpv node tree".
+///
+/// List-of-options properties must be read this way — asking for a
+/// `MPV_FORMAT_STRING` returns an empty string, which is why the first version
+/// of the device picker showed nothing at all. Asking for the more specific
+/// `MPV_FORMAT_NODE_LIST` (8) instead is rejected with `MPV_ERROR_PROPERTY_FORMAT`:
+/// mpv only converts *to* a node list, not *from* a node array, so the caller has
+/// to dispatch on the shape the node turns out to have.
+pub const FORMAT_NODE: c_int = 6;
+/// A node whose own `format` says it is a string.
+pub const NODE_FORMAT_STRING: c_int = 1;
+/// A node whose own `format` says it is an array.
+pub const NODE_FORMAT_ARRAY: c_int = 7;
+/// A node whose own `format` says it is a map.
+pub const NODE_FORMAT_MAP: c_int = 8;
+
+/// `mpv_node`'s name for its automatic "let the OS choose" entry, which
+/// `audio-device-list` puts first. The app maps it to the empty device name so
+/// it collapses into the picker's own "System default" row.
+pub const AUTO_DEVICE: &str = "auto";
 
 /// `mpv_event_id` values relevant to the pump (mirrored from libmpv 2.x
 /// `client.h` so the mapping is verifiable in a pure test).
@@ -102,6 +122,35 @@ struct RawLog {
     log_level: c_int,
 }
 
+/// C layout of `mpv_node_list`, and of `mpv_node_map` — see [`RawNodeMap`].
+#[repr(C)]
+struct RawNodeList {
+    num: c_int,
+    values: *mut RawNode,
+    /// Null for a true array; populated for a map.
+    keys: *mut *mut c_char,
+}
+
+/// C layout of `mpv_node_map`, what a node tagged [`NODE_FORMAT_MAP`] points at.
+///
+/// **Identical to [`RawNodeList`]**, and that is not a typo: verified against the
+/// libmpv this app ships, whose map node reads as `num, values, keys` — the same
+/// order as the list. Believing the two were reversed (as some transcriptions of
+/// `client.h` suggest) makes every `keys` pointer land on a `mpv_node*`, which
+/// then gets dereferenced as a string and crashes the process with
+/// `STATUS_ACCESS_VIOLATION`. `mpv_node_list` is used for both shapes so the
+/// layout exists in exactly one place.
+type RawNodeMap = RawNodeList;
+
+/// C layout of `mpv_node`: a format tag plus a union whose largest member is a
+/// pointer, so the struct is one 8-byte slot plus the 4-byte tag on x64.
+#[repr(C)]
+struct RawNode {
+    /// The union is read as the pointer type of whichever arm the format selects.
+    value: *mut c_void,
+    format: c_int,
+}
+
 type CreateFn = unsafe extern "C" fn() -> *mut c_void;
 type InitializeFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 type TerminateFn = unsafe extern "C" fn(*mut c_void);
@@ -112,6 +161,7 @@ type WaitEventFn = unsafe extern "C" fn(*mut c_void, f64) -> *const RawEvent;
 type WakeupFn = unsafe extern "C" fn(*mut c_void);
 type RequestLogFn = unsafe extern "C" fn(*mut c_void, *const c_char) -> c_int;
 type FreeFn = unsafe extern "C" fn(*mut c_void);
+type FreeNodeContentsFn = unsafe extern "C" fn(*mut RawNode);
 
 /// Runtime-loaded libmpv handle plus the bound symbols.
 ///
@@ -129,6 +179,7 @@ pub struct Mpv {
     wakeup: WakeupFn,
     request_log: RequestLogFn,
     mpv_free: FreeFn,
+    free_node_contents: FreeNodeContentsFn,
 }
 
 // SAFETY: see module docs — libmpv's client API is thread-safe; the handle is
@@ -205,6 +256,12 @@ impl Mpv {
                 .get(b"mpv_request_log_messages")
                 .map_err(|e| format!("mpv_request_log_messages: {e}"))?;
             let mpv_free: FreeFn = *lib.get(b"mpv_free").map_err(|e| format!("mpv_free: {e}"))?;
+            // Present in every libmpv 2.x build; without it a node read could
+            // not release mpv's tree, so treat a missing symbol as a hard error
+            // rather than leaking on every read.
+            let free_node_contents: FreeNodeContentsFn = *lib
+                .get(b"mpv_free_node_contents")
+                .map_err(|e| format!("mpv_free_node_contents: {e}"))?;
             let create: CreateFn = *lib
                 .get(b"mpv_create")
                 .map_err(|e| format!("mpv_create: {e}"))?;
@@ -226,6 +283,7 @@ impl Mpv {
                 wakeup,
                 request_log,
                 mpv_free,
+                free_node_contents,
             })
         }
     }
@@ -312,6 +370,172 @@ impl Mpv {
             Err(rc)
         } else {
             Ok(out != 0)
+        }
+    }
+
+    /// Read a list-of-options property (`audio-device-list` and friends).
+    ///
+    /// Each entry comes back as its key plus whatever string values it contains,
+    /// so the caller does not have to know mpv's exact layout — mpv has shipped
+    /// this property both as an array of maps and as a map of maps.
+    ///
+    /// `Err(rc)` when mpv refuses the read; `Ok(vec![])` when the property is
+    /// valid but empty (no audio device on this machine).
+    pub fn get_option_list(&self, name: &str) -> Result<Vec<Vec<(String, String)>>, c_int> {
+        let mut node = RawNode {
+            value: std::ptr::null_mut(),
+            format: 0,
+        };
+        let rc = self.get_prop(name, FORMAT_NODE, (&mut node as *mut RawNode).cast());
+        if rc < 0 {
+            return Err(rc);
+        }
+        // SAFETY: on success mpv filled `node` with a tree it owns; we read it
+        // and then hand it back exactly once via mpv_free_node_contents.
+        let entries = unsafe { Self::read_entries(&node) };
+        // SAFETY: `node` was allocated by mpv and is released once, on every
+        // path out of here.
+        unsafe { (self.free_node_contents)(&mut node) };
+        Ok(entries)
+    }
+
+    /// Split the root node into one entry per element, whichever shape it has.
+    ///
+    /// # Safety
+    /// `node` must point at a tree mpv just handed over and not yet freed.
+    unsafe fn read_entries(node: &RawNode) -> Vec<Vec<(String, String)>> {
+        if node.value.is_null() {
+            return Vec::new();
+        }
+        match node.format {
+            // An array of entries. mpv keeps no keys for an array.
+            NODE_FORMAT_ARRAY => {
+                // SAFETY: the tag says array, which is `mpv_node_list`'s layout.
+                let list = unsafe { &*(node.value as *const RawNodeList) };
+                let count = list.num.max(0) as usize;
+                if count == 0 || list.values.is_null() {
+                    return Vec::new();
+                }
+                // SAFETY: `num` elements are valid inside the tree mpv owns.
+                let values = unsafe { std::slice::from_raw_parts(list.values, count) };
+                values
+                    .iter()
+                    .map(|value| {
+                        let mut entry = Vec::new();
+                        // SAFETY: `value` is a node inside the tree mpv owns.
+                        unsafe { Self::collect_strings(value, &mut entry, 0) };
+                        entry
+                    })
+                    .collect()
+            }
+            // A map of entries, keyed by the mpv option name.
+            NODE_FORMAT_MAP => {
+                // SAFETY: the tag says map; `RawNodeMap` is `RawNodeList`, whose
+                // field order is the one verified against this libmpv.
+                let map = unsafe { &*(node.value as *const RawNodeMap) };
+                let count = map.num.max(0) as usize;
+                if count == 0 || map.values.is_null() {
+                    return Vec::new();
+                }
+                // SAFETY: `num` elements are valid inside the tree mpv owns.
+                let values = unsafe { std::slice::from_raw_parts(map.values, count) };
+                let keys = unsafe { Self::read_keys(map.keys, count) };
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| {
+                        let mut entry = Vec::new();
+                        // The outer key is mpv's option name ("wasapi/0"), not
+                        // something to show. It is recorded first so a lookup of
+                        // "name"/"description" finds the entry's own fields and
+                        // not this.
+                        entry.push((keys.get(i).cloned().unwrap_or_default(), String::new()));
+                        // SAFETY: `value` is a node inside the tree mpv owns.
+                        unsafe { Self::collect_strings(value, &mut entry, 0) };
+                        entry
+                    })
+                    .collect()
+            }
+            // Not a list at all: report it as a single entry, so a caller that
+            // expected several can still see what mpv said.
+            _ => {
+                let mut entry = Vec::new();
+                // SAFETY: `node` is the tree mpv owns.
+                unsafe { Self::collect_strings(node, &mut entry, 0) };
+                if entry.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![entry]
+                }
+            }
+        }
+    }
+
+    /// Copy up to `count` NUL-terminated keys out of an mpv tree.
+    ///
+    /// # Safety
+    /// `ptr` must be null or point at `count` keys inside a live tree mpv owns.
+    unsafe fn read_keys(ptr: *mut *mut c_char, count: usize) -> Vec<String> {
+        if ptr.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: `count` keys are valid inside the tree mpv owns.
+        unsafe { std::slice::from_raw_parts(ptr, count) }
+            .iter()
+            .map(|k| {
+                if k.is_null() {
+                    String::new()
+                } else {
+                    // SAFETY: keys are NUL-terminated strings mpv owns.
+                    unsafe { std::ffi::CStr::from_ptr(*k) }
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            })
+            .collect()
+    }
+
+    /// Gather a node's string-valued keys into `out`, descending into nested
+    /// containers. Depth is bounded so a malformed tree cannot spin here.
+    ///
+    /// # Safety
+    /// `node` must belong to a live tree mpv owns.
+    unsafe fn collect_strings(node: &RawNode, out: &mut Vec<(String, String)>, depth: usize) {
+        if depth > 3 || node.value.is_null() {
+            return;
+        }
+        match node.format {
+            NODE_FORMAT_STRING => {
+                // SAFETY: the tag says string; mpv NUL-terminates it.
+                let text = unsafe { std::ffi::CStr::from_ptr(node.value as *const c_char) };
+                out.push((String::new(), text.to_string_lossy().into_owned()));
+            }
+            NODE_FORMAT_MAP => {
+                // SAFETY: the tag says map; `RawNodeMap` is `RawNodeList` (see its definition).
+                let map = unsafe { &*(node.value as *const RawNodeMap) };
+                let count = map.num.max(0) as usize;
+                if count == 0 || map.values.is_null() {
+                    return;
+                }
+                // SAFETY: `num` elements are valid inside the tree mpv owns.
+                let values = unsafe { std::slice::from_raw_parts(map.values, count) };
+                let keys = unsafe { Self::read_keys(map.keys, count) };
+                for (i, value) in values.iter().enumerate() {
+                    let key = keys.get(i).cloned().unwrap_or_default();
+                    if value.format == NODE_FORMAT_STRING && !value.value.is_null() {
+                        // SAFETY: the tag says string; mpv NUL-terminates it.
+                        let text =
+                            unsafe { std::ffi::CStr::from_ptr(value.value as *const c_char) };
+                        out.push((key, text.to_string_lossy().into_owned()));
+                    } else {
+                        out.push((key, String::new()));
+                        // SAFETY: `value` is a node inside the tree mpv owns.
+                        unsafe { Self::collect_strings(value, out, depth + 1) };
+                    }
+                }
+            }
+            // Numbers, flags, arrays: nothing a caller can show as text.
+            _ => {}
         }
     }
 

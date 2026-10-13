@@ -42,7 +42,7 @@ leaks that read as broken to end users.
 ## Definition of Done
 
 - [x] AAC-in-`.m4a` shows a lossy-correct label; ALAC shows ALAC
-- [ ] Sample test for the badge function (pure — easy TDD)
+- [x] Sample test for the badge function (pure — easy TDD)
 - [x] No raw `String(e)` in user-facing UI for known error classes
 - [x] Sample friendly error copy for: playback unavailable, scan failed,
       tag-write failed
@@ -61,8 +61,13 @@ leaks that read as broken to end users.
   `scan-error` event handlers. `PLAYER_UNAVAILABLE` is now user-facing copy;
   the specific cause is logged at startup.
 
-**Deferred:** the pure badge-function unit test needs a frontend test runner
-(none in the repo yet) — tracked as separate infra work.
+**Deferred, now done:** `src/format.test.ts` covers `formatBadge` (four cases:
+known codecs, case-insensitivity, that an `.m4a` is never labelled ALAC unless
+the codec really is, and the uppercase fallback) plus `formatDuration`.
+
+Writing that second test found a bug: `formatDuration(NaN)` rendered the literal
+text `"NaN:NaN"`, because `Math.max(0, NaN)` is `NaN`. It now falls back to
+`0:00`, which is what a track with no known length should show.
 
 ## References
 

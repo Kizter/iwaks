@@ -375,46 +375,63 @@ pub struct Player {
     cancelled: AtomicBool,
 }
 
-/// Parse mpv's `audio-device-list` property.
+/// Read mpv's `audio-device-list` into pickable devices.
 ///
-/// The property is a JSON array of `{"name": …, "description": …}`; mpv also
-/// offers an "auto"/default entry with a null name. Anything unparseable
-/// yields an empty list rather than an error, because the caller can still fall
-/// back to "system default".
-fn read_device_list(api: &Mpv) -> Vec<AudioDevice> {
-    /// mpv's entry shape. The system default has a null `name`, so both fields
-    /// are optional here even though [`AudioDevice`] keeps them concrete.
-    #[derive(serde::Deserialize)]
-    struct Raw {
-        #[serde(default)]
-        name: Option<String>,
-        #[serde(default)]
-        description: Option<String>,
-    }
-
-    let Ok(raw) = api.get_string("audio-device-list") else {
-        iwaks_log::line(
-            iwaks_log::Level::Warn,
-            "could not read mpv audio-device-list",
-        );
-        return Vec::new();
+/// The property is a list-of-options, so it must be read as an mpv node tree —
+/// asking for it as a string yields an empty string, which is what made the
+/// picker show nothing but "System default" (issue #23 follow-up). The node
+/// shape has moved around between mpv versions (array of maps vs. map of maps),
+/// so [`device_from_entry`] looks for the two keys it cares about anywhere in an
+/// entry rather than at a fixed position.
+///
+/// Pure and therefore unit-tested; `read_device_list` only does the I/O.
+fn device_from_entry(entry: &[(String, String)]) -> Option<AudioDevice> {
+    // The last string for a key wins: a map-of-maps entry starts with the outer
+    // option name, and the real field comes after it.
+    let field = |key: &str| {
+        entry
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
     };
-    match serde_json::from_str::<Vec<Raw>>(&raw) {
-        Ok(list) => list
-            .into_iter()
-            .map(|d| AudioDevice {
-                name: d.name.unwrap_or_default(),
-                description: d.description.unwrap_or_default(),
-            })
-            .collect(),
-        Err(e) => {
+    let description = field("description").unwrap_or_default();
+    // mpv's own "let the OS choose" entry is dropped: the picker already renders
+    // a "System default" row whose value is the empty device name, and keeping
+    // both would show the same destination twice with two different values.
+    let name = field("name").filter(|n| !n.is_empty() && n != crate::ffi::AUTO_DEVICE)?;
+    Some(AudioDevice { name, description })
+}
+
+/// Ask libmpv which output devices exist.
+///
+/// An empty result is not an error the user should see as a failure: it means
+/// "mpv reported nothing", which is what happens when no audio output has been
+/// opened yet. It is logged so the log says which of the two happened.
+fn read_device_list(api: &Mpv) -> Vec<AudioDevice> {
+    let entries = match api.get_option_list("audio-device-list") {
+        Ok(entries) => entries,
+        Err(rc) => {
             iwaks_log::line(
                 iwaks_log::Level::Warn,
-                &format!("audio-device-list was not the expected JSON ({e})"),
+                &format!("mpv refused audio-device-list ({rc})"),
             );
-            Vec::new()
+            return Vec::new();
         }
-    }
+    };
+    let devices: Vec<AudioDevice> = entries
+        .iter()
+        .filter_map(|e| device_from_entry(e))
+        .collect();
+    iwaks_log::line(
+        iwaks_log::Level::Debug,
+        &format!(
+            "audio-device-list: {} entries, {} pickable",
+            entries.len(),
+            devices.len()
+        ),
+    );
+    devices
 }
 
 impl Player {
@@ -1767,6 +1784,33 @@ mod tests {
         .unwrap()
     }
 
+    /// A player on the **real** audio output.
+    ///
+    /// `ao=null` never enumerates anything, so a device test built on
+    /// [`start_player`] cannot fail — its assertions run over an empty list. That
+    /// is how the picker shipped showing nothing but "System default".
+    fn start_live_audio_player() -> Result<Arc<Player>, String> {
+        let sink: StateSink = Box::new(|_| {});
+        Player::start(
+            &Options {
+                ao_null: false,
+                audio_exclusive: false,
+                audio_device: String::new(),
+            },
+            sink,
+        )
+    }
+
+    /// Whether this machine may be asked to open real audio at all.
+    ///
+    /// Enumerating devices where no endpoint exists crashes libmpv
+    /// (STATUS_ACCESS_VIOLATION), and a native crash cannot be caught from Rust,
+    /// so the tests that need it opt in with `IWAKS_LIVE_AUDIO=1`. CI sets
+    /// nothing and skips them.
+    fn live_audio_requested() -> bool {
+        std::env::var("IWAKS_LIVE_AUDIO").is_ok()
+    }
+
     #[test]
     fn defaults_use_shared_wasapi_audio() {
         // Exclusive mode silences other apps for the whole session; shared is
@@ -2436,6 +2480,71 @@ mod tests {
     }
 
     #[test]
+    fn the_device_list_is_read_from_mpvs_node_tree() {
+        if !have_libmpv() || !live_audio_requested() {
+            return;
+        }
+        let player = start_live_audio_player().expect("a real output opens here");
+
+        // Before anything plays. This is the state the picker is in when the user
+        // opens Settings on a fresh launch, and the state in which it showed
+        // nothing but "System default".
+        let before = player.list_devices();
+        eprintln!("before playback: {} devices", before.len());
+        assert!(
+            !before.is_empty(),
+            "mpv enumerates devices before anything is played — Settings is read before playback"
+        );
+
+        let dir = test_dir("device-list");
+        let a = dir.join("a.wav");
+        write_wav(&a, 2.0);
+        let tracks = vec![track(a.to_str().unwrap(), "A", 2.0)];
+        player.play_tracks(tracks, 0);
+        wait_for(&player, Duration::from_secs(5), |s| {
+            !s.paused && s.duration > 0.2
+        })
+        .expect("the track plays, so an audio output exists now");
+
+        let devices = player.list_devices();
+        eprintln!("after playback: {devices:?}");
+        assert!(
+            !devices.is_empty(),
+            "mpv offers the devices of a machine that is playing audio"
+        );
+        assert!(
+            devices.iter().any(|d| !d.name.is_empty()),
+            "and at least one of them is selectable: {devices:?}"
+        );
+        // The default entry has no name; every listed entry must still say
+        // something, or the picker would render a blank row.
+        assert!(
+            devices
+                .iter()
+                .all(|d| !d.name.is_empty() || !d.description.is_empty()),
+            "every entry carries something to show: {devices:?}"
+        );
+
+        // And the picker has to be able to do anything with those names. Only
+        // names mpv itself listed are ever sent back to it — a fabricated one
+        // makes libmpv open an output that cannot exist, which crashed the whole
+        // test binary before (STATUS_ACCESS_VIOLATION).
+        let Some(target) = first_selectable_device(&player) else {
+            panic!("mpv listed devices but none is selectable: {devices:?}");
+        };
+        player.set_audio_device(&target);
+        let switched = wait_for(&player, Duration::from_secs(5), |s| {
+            s.audio_device == target
+        })
+        .expect("the chosen device is the one mpv reports");
+        assert_eq!(
+            switched.audio_device, target,
+            "and the choice survives into the published state"
+        );
+        player.shutdown();
+    }
+
+    #[test]
     #[ignore = "enumerates real audio devices; crashes libmpv on a machine with no audio device"]
     fn device_list_is_read_from_the_pump_and_answers_the_caller() {
         if !have_libmpv() {
@@ -2531,20 +2640,64 @@ mod tests {
     }
 
     #[test]
-    fn a_device_list_that_is_not_json_degrades_to_empty() {
-        // Guards the fallback path without a live mpv: the parse is the only
-        // thing between a weird property value and a hang in the UI thread.
-        let parsed: Result<Vec<AudioDevice>, _> = serde_json::from_str::<Vec<AudioDevice>>(
-            r#"[{"name":"wasapi/a","description":"Speakers"}]"#,
-        );
+    fn a_device_entry_becomes_a_pickable_device() {
+        // The shape mpv actually returns for `audio-device-list`: an array whose
+        // elements are maps of `name` / `description` strings. Pure, so it runs
+        // everywhere — the bug it guards was that the whole node tree was never
+        // read at all, which no assertion here could have seen.
+        let entry = vec![
+            ("name".to_string(), "wasapi/{04c02c64}".to_string()),
+            ("description".to_string(), "Speakers".to_string()),
+        ];
         assert_eq!(
-            parsed.unwrap(),
-            [AudioDevice {
-                name: "wasapi/a".to_string(),
+            device_from_entry(&entry),
+            Some(AudioDevice {
+                name: "wasapi/{04c02c64}".to_string(),
                 description: "Speakers".to_string()
-            }]
+            })
         );
-        assert!(serde_json::from_str::<Vec<AudioDevice>>("not json").is_err());
+    }
+
+    #[test]
+    fn a_map_of_maps_entry_is_read_through_its_outer_key() {
+        // mpv has shipped this property keyed by its own option name. The real
+        // fields sit after it, which is why the lookup takes the *last* match.
+        let entry = vec![
+            ("wasapi/0".to_string(), String::new()),
+            ("name".to_string(), "wasapi/a".to_string()),
+            ("description".to_string(), "Headphones".to_string()),
+        ];
+        assert_eq!(
+            device_from_entry(&entry),
+            Some(AudioDevice {
+                name: "wasapi/a".to_string(),
+                description: "Headphones".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn the_system_default_entry_is_left_to_the_picker() {
+        // mpv lists its own automatic device first. The picker already renders a
+        // "System default" row with an empty value; keeping this one would show
+        // the same destination twice, and both as different select values.
+        let auto = vec![
+            ("name".to_string(), "auto".to_string()),
+            ("description".to_string(), "Autoselect device".to_string()),
+        ];
+        assert_eq!(device_from_entry(&auto), None, "auto is the empty choice");
+        // An entry with no name at all is the same case, spelled differently.
+        let unnamed = vec![
+            ("name".to_string(), String::new()),
+            ("description".to_string(), "System default".to_string()),
+        ];
+        assert_eq!(device_from_entry(&unnamed), None);
+        // Nothing usable: not a device, and must not become a blank row.
+        assert_eq!(device_from_entry(&[]), None);
+        assert_eq!(
+            device_from_entry(&[("flags".to_string(), "default".to_string())]),
+            None
+        );
     }
 
     // ---- crossfade prefetch (issue #27, stage 2) ----

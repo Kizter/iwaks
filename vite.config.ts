@@ -1,6 +1,5 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-// @ts-expect-error type error without @types/node package
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 
@@ -28,5 +27,15 @@ export default defineConfig(() => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+
+  // Tests run in jsdom so React components can be rendered without a browser.
+  // Kept in this file (rather than a separate vitest.config) so the test run and
+  // the app build cannot drift apart on plugins or aliases.
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test-setup.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 }));

@@ -46,7 +46,7 @@ view.
 - [x] Zero-result search shows a "No results" state, not onboarding
 - [x] Truly empty library (no query) still shows onboarding
 - [x] Copy strings in code (single source of truth)
-- [ ] Frontend tests (vitest) cover both states
+- [x] Frontend tests (vitest) cover both states
 
 ## Outcome
 
@@ -55,8 +55,18 @@ flag renders a "No results for “<query>”" state with a Clear-search button
 for Songs, Albums/Artists/Folders, and playlist detail. The playlist-detail
 "no match" note was folded into the shared state for consistency.
 
-**Deferred:** the repo has no frontend test runner (no vitest/`@types/node`);
-adding one is a separate infra task tracked outside this issue.
+**Deferred, now done:** the repo had no frontend test runner. Vitest +
+`@testing-library/react` + jsdom are installed, and the two states are extracted
+into `src/EmptyStates.tsx` (`NoResultsState`, `OnboardingState`) so they can be
+asserted directly instead of through the whole `App`. Nine tests in
+`src/EmptyStates.test.tsx`: a query that matched nothing names the query and
+never shows the onboarding copy, a filter-only miss is described differently,
+both escapes appear when both narrowed the view, and each button does what it
+says.
+
+Extracting them was the point, not a refactor for its own sake: while both
+states were inline in `App.tsx` behind one boolean, they were one edit away from
+merging again — which is exactly the bug.
 
 ## References
 
