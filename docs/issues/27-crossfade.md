@@ -2,14 +2,13 @@
 title: "Crossfade (two libmpv cores + volume ramp)"
 labels: ["enhancement", "priority:P3", "area:player"]
 milestone: "v0.3.0"
-status: "in progress"
+status: "done"
 ---
 
-> **Plan, executed in stages.** This was the riskiest item on the v0.3.0
-> roadmap, written down before any code so the decision to attempt it stayed
-> deliberate and reversible at every stage. Stages 1–3 have landed (the feature
-> is code-complete but off by default); stage 4 — the two settings, the UI and
-> persistence — is what makes it reachable by a user.
+> **Landed, in four stages.** This was the riskiest item on the v0.3.0 roadmap,
+> written down before any code so the decision to attempt it stayed deliberate
+> and reversible at every stage. Each stage left the app working; the feature
+> ships **off by default**.
 
 ## Summary
 
@@ -191,7 +190,7 @@ Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 325 passed, 8 ignore
 (5 live cover + 3 audio device), verified with `RUST_TEST_THREADS=1`; the
 crossfade tests repeated three times to check the timing-sensitive ones.
 
-### Stage 4 — setting, UI, persistence
+### Stage 4 — setting, UI, persistence — **done**
 - **Two settings, not one.** `design.md` §4.2 says "toggle, default off", so
   "enabled" and "how long" are separate concerns — a single `seconds = 0`
   sentinel would also mean "off", making a 1 s crossfade impossible to express:
@@ -211,13 +210,50 @@ crossfade tests repeated three times to check the timing-sensitive ones.
 - **DoD:** the choice survives a restart; default is off; a 1 s crossfade is
   selectable (the two-setting split above is what makes that possible)
 
+**Outcome.** Two rows in the **Audio output** group — a Crossfade switch and a
+**Fade length** slider (1–10 s, half-second steps) — plus `get_crossfade` /
+`set_crossfade`. Unlike exclusive output, this one applies **immediately**: the
+pump re-reads the preferences on every tick, so the next prefetch uses the new
+window, and turning it off mid-ramp lands the ramp through the same
+`Cmd::ClearPrefetch` path the queue edits use.
+
+Decisions that were only forced once there was a control to put them in:
+
+- **The pair is written and rolled back together.** Both controls go through one
+  `commitCrossfade`, because a failed write that left the switch on and the
+  slider at a different value would have the UI describing something that was
+  never saved.
+- **The slider writes on release, not on every step.** Dragging fires `change`
+  per pixel; committing each one would write the database on every movement and
+  queue a command the pump does not need. Keyboard arrows arrive as
+  change-then-keyup, so they land on the same path.
+- **The stored row is clamped on read *and* on write** (`clamp_crossfade_seconds`):
+  the settings table is plain text a person can edit, and an unchecked value
+  would otherwise reach libmpv as the fade window. NaN and ±∞ fall back to the
+  default — an infinite window would make every track "about to end".
+- **The note says what crossfade costs** (D2), in the same place the app already
+  explains an exclusive-mode trade-off. It also grows one sentence when
+  **exclusive mode is on**: crossfade would then stay inactive until Iwaks
+  restarts, which is otherwise a silent no-op the user cannot explain.
+- The slider announces `aria-valuetext="3 seconds"`, and its visible number is
+  `aria-hidden`, so a screen reader hears a duration instead of a bare digit.
+
+2 new tests for the clamp (the first in the Tauri crate: the logic that decides
+what reaches libmpv belongs to the app layer, and it is pure enough to test
+there). The interaction was verified in a browser against a stubbed `invoke`:
+one write per gesture, none during a drag, the slider unlocking on enable, and
+a rejected write rolling the switch back with an error.
+
+Gates: `cargo fmt`/`clippy` clean; `cargo test --workspace` 328 passed, 8 ignored;
+`npx tsc --noEmit` and `npm run build` clean.
+
 ## Decisions
 
 **D1 — default 3 s, range 1–10 s, split into an enable flag and a duration.**
 (Decided.) See Stage 4.
 
 **D2 — the crossfade ↔ gapless trade-off belongs in the control's own note, not
-in a modal.** (Proposed, not yet implemented.) `design.md` §4.2 promises gapless;
+in a modal.** (Decided and implemented in stage 4.) `design.md` §4.2 promises gapless;
 crossfade cannot keep it, and that has to be stated where the user turns the
 feature on. The app already has this pattern — the Exclusive mode switch
 explains its cost in the same place — so this should be one sentence in
@@ -250,7 +286,7 @@ it on its own would have meant a featureless extra core slot.
 - [x] A completed crossfade reports the new track, correct index and position
 - [x] Transport commands during a fade never leave both cores audible
 - [x] Exclusive mode disables crossfade instead of failing
-- [ ] Setting is off by default and survives a restart
+- [x] Setting is off by default and survives a restart
 - [x] `cargo fmt`/`clippy`/`test` and the frontend gates green at every stage
 
 ## Out of scope
@@ -263,11 +299,10 @@ it on its own would have meant a featureless extra core slot.
 
 1. ~~Default duration~~ — **decided**: 3 s, range 1–10 s, and a separate enable
    flag (see D1).
-2. ~~Whether the gapless trade-off is surfaced in the UI~~ — **proposed**: yes, one
-   sentence in the control's note (see D2). Not implemented yet; Stage 1 touches
-   no UI.
-3. ~~Whether Stage 1 alone is worth landing~~ — **moot** (see D3): stages 1–3 land
-   together.
+2. ~~Whether the gapless trade-off is surfaced in the UI~~ — **decided and done**:
+   yes, one sentence in the control's note (see D2).
+3. ~~Whether Stage 1 alone is worth landing~~ — **moot** (see D3): all four stages
+   landed together.
 
 ## References
 

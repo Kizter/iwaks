@@ -83,7 +83,8 @@ const DEVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 /// Crossfade preferences (issue #27). `enabled` is the separate flag the plan
 /// settled on: a duration of 0 must be able to mean "very short fade", not
 /// "off".
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Crossfade {
     pub enabled: bool,
     /// Seconds of overlap requested. Only read when `enabled`.

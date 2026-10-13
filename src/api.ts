@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
+  CrossfadeSettings,
   EqPreset,
   Lyrics,
   Playlist,
@@ -200,6 +201,19 @@ export function getAudioExclusive(): Promise<boolean> {
 /** Turn exclusive output on/off; applied at the next start. */
 export function setAudioExclusive(enabled: boolean): Promise<void> {
   return invoke<void>("set_audio_exclusive", { enabled });
+}
+
+/** The stored crossfade preferences (issue #27). */
+export function getCrossfade(): Promise<CrossfadeSettings> {
+  return invoke<CrossfadeSettings>("get_crossfade");
+}
+
+/**
+ * Remember the crossfade choice and apply it to the running session; the
+ * duration is clamped to 1–10 s on the Rust side.
+ */
+export function setCrossfade(crossfade: CrossfadeSettings): Promise<void> {
+  return invoke<void>("set_crossfade", { crossfade });
 }
 
 /** The user's saved equalizer presets (empty when none have been saved). */

@@ -3,12 +3,14 @@ import { DiscordLogo, Keyboard, NotePencil, PaintBrushBroad, SpeakerHigh } from 
 import {
   getAudioDevice,
   getAudioExclusive,
+  getCrossfade,
   getLogPath,
   getOnlineCover,
   getTheme,
   listAudioDevices,
   setAudioDevice,
   setAudioExclusive,
+  setCrossfade,
   setOnlineCover,
   setTheme,
   type AudioDevice,
@@ -21,6 +23,13 @@ import {
   watchSystemTheme,
   type ThemeMode,
 } from "./theme";
+import type { CrossfadeSettings } from "./types";
+
+/** Bounds of the overlap control; the Rust side clamps to the same numbers. */
+const CROSSFADE_MIN = 1;
+const CROSSFADE_MAX = 10;
+/** Half a second is fine enough to tune a fade by ear, coarse enough to hit. */
+const CROSSFADE_STEP = 0.5;
 
 /** Every global shortcut, so the keys are discoverable without a manual. */
 const SHORTCUTS: Array<{ keys: string; what: string }> = [
@@ -47,6 +56,11 @@ export default function Settings() {
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [device, setDevice] = useState<string | null>(null);
   const [exclusive, setExclusive] = useState<boolean | null>(null);
+  // Crossfade (issue #27). `null` until the stored pair arrives. `draft` holds
+  // the slider position while it is being dragged: committing every step would
+  // write to the database on each pixel of movement.
+  const [crossfade, setCrossfadeState] = useState<CrossfadeSettings | null>(null);
+  const [fadeSeconds, setFadeSeconds] = useState<number | null>(null);
   // Appearance (issue #25). `null` until the stored mode arrives.
   const [theme, setThemeMode] = useState<ThemeMode | null>(null);
   // Unsubscribe from the OS theme watcher while this page is mounted.
@@ -89,6 +103,28 @@ export default function Settings() {
         setExclusive(x);
       })
       .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    getCrossfade()
+      .then((c) => {
+        if (!alive) return;
+        // Functional updates so a late answer cannot overwrite a choice the
+        // user already made while the read was in flight.
+        setCrossfadeState((current) => current ?? c);
+        setFadeSeconds((current) => current ?? c.seconds);
+      })
+      .catch(() => {
+        // Defaults the same way the Rust side does, so the row still works.
+        if (alive) {
+          setCrossfadeState({ enabled: false, seconds: 3 });
+          setFadeSeconds(3);
+        }
+      });
     return () => {
       alive = false;
     };
@@ -151,6 +187,34 @@ export default function Settings() {
       setExclusive(previous);
       setError(`Couldn't save that setting — ${friendlyError(e)}`);
     });
+  };
+
+  // The crossfade is stored as one pair, so both controls go through here: a
+  // failed write has to put both back, or the switch and the slider would
+  // disagree about what is saved.
+  const commitCrossfade = (next: CrossfadeSettings, previous: CrossfadeSettings | null) => {
+    setCrossfadeState(next);
+    setFadeSeconds(next.seconds);
+    void setCrossfade(next).catch((e: unknown) => {
+      setCrossfadeState(previous);
+      setFadeSeconds(previous ? previous.seconds : null);
+      setError(`Couldn't save that setting — ${friendlyError(e)}`);
+    });
+  };
+
+  const toggleCrossfade = (next: boolean) => {
+    if (!crossfade) return;
+    commitCrossfade({ ...crossfade, enabled: next }, crossfade);
+  };
+
+  // Fires on release rather than on every step of the drag, so one gesture is
+  // one write. Keyboard arrows arrive as change-then-keyup, so they land here
+  // too; a click that did not move the slider writes the value back unchanged.
+  const commitFadeSeconds = () => {
+    if (!crossfade || fadeSeconds === null || fadeSeconds === crossfade.seconds) {
+      return;
+    }
+    commitCrossfade({ ...crossfade, seconds: fadeSeconds }, crossfade);
   };
 
   const toggle = (next: boolean) => {
@@ -298,6 +362,71 @@ export default function Settings() {
             >
               <span className="switch-knob" aria-hidden="true" />
             </button>
+          </div>
+
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title" id="set-crossfade">
+                Crossfade
+              </span>
+              <span className="set-note">
+                Overlaps the end of one song with the start of the next. It takes
+                over as soon as the overlap reaches its halfway point, so
+                pressing pause, skipping or stopping always lands on the track you
+                can hear most of. Sample-accurate transitions are given up while
+                it's on — tracks stop being gapless — and it can't be combined
+                with exclusive output. Off is the default.
+                {exclusive
+                  ? " Exclusive mode is on, so crossfade stays inactive until you turn it off and restart Iwaks."
+                  : ""}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={crossfade?.enabled ?? false}
+              aria-labelledby="set-crossfade"
+              className={`switch${crossfade?.enabled ? " on" : ""}`}
+              disabled={crossfade === null}
+              onClick={() => toggleCrossfade(!crossfade?.enabled)}
+            >
+              <span className="switch-knob" aria-hidden="true" />
+            </button>
+          </div>
+
+          <div className="set-row">
+            <div className="set-text">
+              <span className="set-title" id="set-fade-seconds">
+                Fade length
+              </span>
+              <span className="set-note">
+                How much of each song overlaps. Three seconds is a good starting
+                point; longer fades suit intros, shorter ones keep fast tracks
+                from being cut into.
+              </span>
+            </div>
+            <div className="set-slider">
+              <input
+                type="range"
+                min={CROSSFADE_MIN}
+                max={CROSSFADE_MAX}
+                step={CROSSFADE_STEP}
+                value={fadeSeconds ?? CROSSFADE_MIN}
+                disabled={crossfade === null || !crossfade.enabled}
+                aria-labelledby="set-fade-seconds"
+                aria-valuetext={`${fadeSeconds ?? CROSSFADE_MIN} seconds`}
+                onChange={(e) => setFadeSeconds(Number(e.target.value))}
+                onPointerUp={commitFadeSeconds}
+                onKeyUp={commitFadeSeconds}
+                onBlur={commitFadeSeconds}
+                onPointerCancel={commitFadeSeconds}
+              />
+              {/* The input announces the value through aria-valuetext, so the
+                  visible number is decoration for sighted users only. */}
+              <span className="set-value" aria-hidden="true">
+                {fadeSeconds ?? CROSSFADE_MIN}s
+              </span>
+            </div>
           </div>
         </section>
 

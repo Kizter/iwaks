@@ -73,12 +73,21 @@ export interface PlayerState {
   replaygain: ReplayGainMode;
   /** Active mpv `audio-device` (empty = system default). */
   audioDevice: string;
-  /** True while the next track sits loaded and paused in the second core. */
+  /** True while a second core holds the next track — loaded, and either paused
+   * (crossfade armed but the window not open yet) or fading in. */
   prefetched: boolean;
 }
 
 /** Mirrors iwaks_player::ReplayGainMode (serde lowercase; mpv: no|track|album). */
 export type ReplayGainMode = "off" | "track" | "album";
+
+/** Mirrors iwaks_player::Crossfade (serde camelCase). */
+export interface CrossfadeSettings {
+  /** Crossfade on. Separate from `seconds` so a short fade stays expressible. */
+  enabled: boolean;
+  /** Overlap in seconds (1–10). Only read when `enabled`. */
+  seconds: number;
+}
 
 /** Mirrors iwaks_library::persist::EqPreset (serde camelCase). */
 export interface EqPreset {

@@ -569,6 +569,29 @@ body {
   cursor: default;
 }
 
+/* Fade length: the slider carries the value, so it is given room and the
+   number sits at a fixed width beside it — a slider that reflows as the digits
+   change is one you cannot aim at. */
+.set-slider {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+.set-slider input[type="range"] {
+  width: 180px;
+}
+.set-slider input[type="range"]:disabled {
+  opacity: 0.55;
+}
+.set-value {
+  min-width: 34px;
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
 .set-log-path {
   flex: none;
   max-width: 340px;

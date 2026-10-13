@@ -123,6 +123,10 @@ pub const SETTING_CROSSFADE: &str = "audio.crossfade";
 /// Crossfade overlap in seconds (issue #27). Kept separate from the on/off flag
 /// so a short fade is expressible.
 pub const SETTING_CROSSFADE_SECONDS: &str = "audio.crossfade_seconds";
+/// Bounds the UI offers for the overlap, per D1. The player floor is lower
+/// (defensive, for a hand-written value); this is what a person can pick.
+pub const MIN_CROSSFADE_SECONDS: f64 = 1.0;
+pub const MAX_CROSSFADE_SECONDS: f64 = 10.0;
 
 /// The stored crossfade preferences, falling back to the plan's defaults.
 ///
@@ -245,6 +249,86 @@ fn set_audio_exclusive(enabled: bool, state: State<'_, AppState>) -> Result<(), 
             if enabled { "true" } else { "false" },
         )
         .map_err(|e| e.to_string())
+}
+
+/// The stored crossfade preferences, clamped to what the UI offers (issue #27).
+#[tauri::command]
+fn get_crossfade(state: State<'_, AppState>) -> Crossfade {
+    let stored = stored_crossfade(&state.db_path);
+    Crossfade {
+        enabled: stored.enabled,
+        seconds: clamp_crossfade_seconds(stored.seconds),
+    }
+}
+
+/// Remember the crossfade choice and apply it to the running session.
+///
+/// Unlike exclusive output this takes effect immediately: the pump re-reads the
+/// preferences on every tick, so the next prefetch uses the new window. Stored
+/// first — a write that fails must not leave the UI and the session disagreeing,
+/// and the frontend rolls the switch back when the command rejects.
+#[tauri::command]
+fn set_crossfade(crossfade: Crossfade, state: State<'_, AppState>) -> Result<(), String> {
+    let wanted = Crossfade {
+        enabled: crossfade.enabled,
+        seconds: clamp_crossfade_seconds(crossfade.seconds),
+    };
+    let lib = open_lib(&state)?;
+    lib.set_setting(
+        SETTING_CROSSFADE,
+        if wanted.enabled { "true" } else { "false" },
+    )
+    .map_err(|e| e.to_string())?;
+    lib.set_setting(SETTING_CROSSFADE_SECONDS, &wanted.seconds.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(p) = player(&state) {
+        p.set_crossfade(wanted);
+    }
+    Ok(())
+}
+
+/// Keep a stored duration inside the range D1 settled on: 1–10 s.
+///
+/// Below 1 s it sounds like a glitch rather than a fade, and above 10 s a fade
+/// starts swallowing whole tracks whose intros are short. Non-finite input (a
+/// hand-edited settings table) falls back to the default instead of reaching
+/// libmpv.
+fn clamp_crossfade_seconds(seconds: f64) -> f64 {
+    if !seconds.is_finite() {
+        return DEFAULT_CROSSFADE_SECONDS;
+    }
+    seconds.clamp(MIN_CROSSFADE_SECONDS, MAX_CROSSFADE_SECONDS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stored row is the one untrusted input left in the crossfade path: it
+    /// is plain text a user can edit, and it reaches libmpv as a fade window.
+    #[test]
+    fn a_stored_overlap_is_clamped_to_what_the_ui_offers() {
+        assert_eq!(clamp_crossfade_seconds(5.0), 5.0, "a normal value passes");
+        assert_eq!(clamp_crossfade_seconds(1.0), 1.0, "the ends are reachable");
+        assert_eq!(clamp_crossfade_seconds(10.0), 10.0);
+        assert_eq!(clamp_crossfade_seconds(0.2), MIN_CROSSFADE_SECONDS);
+        assert_eq!(clamp_crossfade_seconds(-40.0), MIN_CROSSFADE_SECONDS);
+        assert_eq!(clamp_crossfade_seconds(600.0), MAX_CROSSFADE_SECONDS);
+    }
+
+    #[test]
+    fn an_unusable_stored_overlap_falls_back_to_the_default() {
+        // A NaN would survive `clamp` untouched and poison every comparison the
+        // ramp makes against it. An infinity is not a meaningful window either —
+        // it would make every track "about to end" — so it defaults too.
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                clamp_crossfade_seconds(bad),
+                DEFAULT_CROSSFADE_SECONDS,
+                "{bad} is not a duration anyone can mean"
+            );
+        }
+    }
 }
 
 /// Path of the log file this session writes to (`null` when logging to disk
@@ -954,6 +1038,8 @@ pub fn run() {
             get_audio_device,
             get_audio_exclusive,
             set_audio_exclusive,
+            get_crossfade,
+            set_crossfade,
             stop_playback,
             get_player_state,
             get_lyrics,
