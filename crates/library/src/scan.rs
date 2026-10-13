@@ -10,6 +10,27 @@ use iwaks_tags::read::read_metadata;
 
 use crate::db::{Library, LibraryError};
 
+/// Run `f` inside one write transaction committed at the end.
+///
+/// Without this the scanner commits once per file, and a 10k-file scan pays an
+/// fsync per insert (measured ~41 s on the NFR A2 corpus — over design.md's
+/// 30 s budget). One commit keeps the durability story (a crashed scan simply
+/// restarts) at a fraction of the cost. Any error rolls the whole pass back,
+/// so the library is never half-written.
+fn with_scan_transaction<T>(
+    lib: &mut Library,
+    f: impl FnOnce(&mut Library) -> Result<T, LibraryError>,
+) -> Result<T, LibraryError> {
+    lib.conn_mut().execute_batch("BEGIN;")?;
+    let result = f(lib);
+    if result.is_ok() {
+        lib.conn_mut().execute_batch("COMMIT;")?;
+    } else {
+        let _ = lib.conn_mut().execute_batch("ROLLBACK;");
+    }
+    result
+}
+
 #[derive(Debug, Clone)]
 pub struct ScanOptions {
     /// Root folder to walk recursively.
@@ -51,46 +72,51 @@ pub fn scan(
         .map(|(p, m, s)| (norm(&p), (p, m, s)))
         .collect();
 
-    for path in &files {
-        let stat = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(_) => {
-                report.errors += 1;
-                continue;
-            }
-        };
-        let modified = modified_secs(&stat);
-        let size = stat.len() as i64;
-        let norm_path = norm(&path.to_string_lossy());
-
-        let state = match existing.get(&norm_path) {
-            Some((_, db_mtime, db_size)) => {
-                classify_file(Some(*db_mtime), Some(*db_size), modified, size)
-            }
-            None => FileState::New,
-        };
-
-        match state {
-            FileState::Unchanged => report.skipped += 1,
-            FileState::New | FileState::Changed => match read_metadata(path) {
-                Ok(meta) => {
-                    let track =
-                        Track::from_metadata(&path.to_string_lossy(), &meta, size, modified);
-                    lib.upsert_track(&track)?;
-                    match state {
-                        FileState::New => report.added += 1,
-                        _ => report.updated += 1,
-                    }
+    // One transaction for the whole pass (see `with_scan_transaction`): a
+    // commit per file is what took a 10k scan past the NFR A2 budget.
+    let mut report = with_scan_transaction(lib, |lib| {
+        for path in &files {
+            let stat = match std::fs::metadata(path) {
+                Ok(m) => m,
+                Err(_) => {
+                    report.errors += 1;
+                    continue;
                 }
-                Err(_) => report.errors += 1,
-            },
-        }
-        report.scanned += 1;
+            };
+            let modified = modified_secs(&stat);
+            let size = stat.len() as i64;
+            let norm_path = norm(&path.to_string_lossy());
 
-        if report.scanned.is_multiple_of(50) {
-            on_progress(&report);
+            let state = match existing.get(&norm_path) {
+                Some((_, db_mtime, db_size)) => {
+                    classify_file(Some(*db_mtime), Some(*db_size), modified, size)
+                }
+                None => FileState::New,
+            };
+
+            match state {
+                FileState::Unchanged => report.skipped += 1,
+                FileState::New | FileState::Changed => match read_metadata(path) {
+                    Ok(meta) => {
+                        let track =
+                            Track::from_metadata(&path.to_string_lossy(), &meta, size, modified);
+                        lib.upsert_track(&track)?;
+                        match state {
+                            FileState::New => report.added += 1,
+                            _ => report.updated += 1,
+                        }
+                    }
+                    Err(_) => report.errors += 1,
+                },
+            }
+            report.scanned += 1;
+
+            if report.scanned.is_multiple_of(50) {
+                on_progress(&report);
+            }
         }
-    }
+        Ok(report)
+    })?;
 
     // Prune only tracks under the scanned root whose file genuinely vanished.
     // Two guards keep one scan from wiping rows it shouldn't:
@@ -129,30 +155,34 @@ pub fn scan_files(
     };
     on_progress(&report);
 
-    for path in paths {
-        let stat = match std::fs::metadata(path) {
-            Ok(m) => m,
-            Err(_) => {
-                report.errors += 1;
-                continue;
-            }
-        };
-        let modified = modified_secs(&stat);
-        let size = stat.len() as i64;
+    let report = with_scan_transaction(lib, |lib| {
+        for path in paths {
+            let stat = match std::fs::metadata(path) {
+                Ok(m) => m,
+                Err(_) => {
+                    report.errors += 1;
+                    continue;
+                }
+            };
+            let modified = modified_secs(&stat);
+            let size = stat.len() as i64;
 
-        match read_metadata(path) {
-            Ok(meta) => {
-                let track = Track::from_metadata(&path.to_string_lossy(), &meta, size, modified);
-                lib.upsert_track(&track)?;
-                report.added += 1;
+            match read_metadata(path) {
+                Ok(meta) => {
+                    let track =
+                        Track::from_metadata(&path.to_string_lossy(), &meta, size, modified);
+                    lib.upsert_track(&track)?;
+                    report.added += 1;
+                }
+                Err(_) => report.errors += 1,
             }
-            Err(_) => report.errors += 1,
+            report.scanned += 1;
+            if report.scanned.is_multiple_of(20) {
+                on_progress(&report);
+            }
         }
-        report.scanned += 1;
-        if report.scanned.is_multiple_of(20) {
-            on_progress(&report);
-        }
-    }
+        Ok(report)
+    })?;
 
     on_progress(&report);
     Ok(report)

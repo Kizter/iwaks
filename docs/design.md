@@ -28,6 +28,16 @@
 | A7 | libmpv di-bundle sebagai `libmpv-2.dll` untuk Windows (supplied binary) |
 | A8 | Urutan casting post-v1: **DLNA dulu → Chromecast menyusul** — keduanya **ditunda ke post-v1** (keputusan evaluasi M5, Amendemen M5); tidak ada kebutuhan untuk pemakaian pribadi |
 
+**Verifikasi A2 (scan 10.000 file).** Diukur dengan harness yang ikut di-commit — `scripts/gen-scan-bench-corpus.ps1` (korpus 10.000 WAV kecil) + `crates/library/examples/scan_bench.rs` (waktu `scan` terhadap DB baru; argumen `reuse` untuk pass inkremental) — build release, mesin pengembangan:
+
+| Skenario | Waktu | Anggaran 30 s |
+|---|---|---|
+| Cold scan, 10.000 file baru — sebelum perbaikan | 40,76 s | ❌ 136% |
+| Cold scan, 10.000 file baru — sesudah perbaikan | **19,23 s** | ✅ 64% |
+| Pass inkremental (semua `unchanged`) | 0,28 s | ✅ |
+
+Sebelum perbaikan, `upsert_track` melakukan autocommit per file, sehingga scan 10.000 file membayar 10.000 fsync. Kini seluruh pass dibungkus satu transaksi (`with_scan_transaction`, `crates/library/src/scan.rs`), dengan rollback penuh bila satu file gagal — pustaka tidak pernah setengah tertulis.
+
 ## 3. Decision Log
 
 | # | Keputusan | Alternatif | Alasan |
