@@ -76,12 +76,17 @@ Tests:
   It is gated on `IWAKS_LIVE_AUDIO=1`, because enumerating devices where no
   endpoint exists crashes libmpv — CI has no endpoint and skips it.
 
-## Follow-up
+## Follow-up (resolved)
 
-The three older device tests still build on `start_player()`/`ao=null` and are
-therefore vacuous. They should be either gated on `IWAKS_LIVE_AUDIO` like the new
-one or rewritten against the pure helpers; leaving them as they are keeps three
-tests that look like coverage and are not.
+The three older device tests now gate on `IWAKS_LIVE_AUDIO` like the live test, so
+there is one pattern instead of two and a conscious skip in CI rather than
+`#[ignore]` (which in the old test world read as "looks like coverage but never
+runs"). Their comment in an earlier draft of this issue called them *vacuous*;
+that was true of the string-read era, where `ao=null` meant the list was always
+empty and every assertion ran over nothing. Once the node read landed, they
+enumerate real devices even under `ao=null` on machines that have endpoints —
+verified on a machine with audio, where all three pass and one actually switches
+to a listed WASAPI device.
 
 ## References
 

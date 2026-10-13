@@ -2545,9 +2545,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "enumerates real audio devices; crashes libmpv on a machine with no audio device"]
     fn device_list_is_read_from_the_pump_and_answers_the_caller() {
-        if !have_libmpv() {
+        // Enumerating needs a machine with a real audio endpoint: libmpv itself
+        // crashes (STATUS_ACCESS_VIOLATION) where none exists, and a native
+        // crash cannot be caught from Rust. CI has no endpoint, so this opts in
+        // via IWAKS_LIVE_AUDIO, exactly like the node-read test above.
+        if !have_libmpv() || !live_audio_requested() {
             return;
         }
         let player = start_player();
@@ -2588,9 +2591,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switches the real audio output; crashes libmpv on a machine with no audio device"]
     fn choosing_a_device_is_reflected_in_the_published_state() {
-        if !have_libmpv() {
+        if !have_libmpv() || !live_audio_requested() {
             return;
         }
         let player = start_player();
@@ -2616,9 +2618,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "switches the real audio output; crashes libmpv on a machine with no audio device"]
     fn the_system_default_choice_does_not_wedge_the_playback_thread() {
-        if !have_libmpv() {
+        if !have_libmpv() || !live_audio_requested() {
             return;
         }
         let player = start_player();
