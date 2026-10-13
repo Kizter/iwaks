@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBadge, formatDuration } from "./format";
+import { formatBadge, formatDuration, formatTech } from "./format";
 
 /**
  * The badge is the only place the app claims something about a file's fidelity,
@@ -38,6 +38,42 @@ describe("formatBadge", () => {
     expect(formatBadge("tta")).toBe("TTA");
     // Blank input must not crash a row: it renders as an empty badge.
     expect(formatBadge("")).toBe("");
+  });
+});
+
+/**
+ * The hi-res readout is the only place the app states a lossless file's full
+ * fidelity claim. When the scanner could not read a rate or depth it must be
+ * omitted, never guessed at (issue #10).
+ */
+describe("formatTech", () => {
+  it("renders the lossless claim a hi-res player should make", () => {
+    expect(formatTech({ format: "flac", sampleRate: 192_000, bitDepth: 24 })).toBe(
+      "FLAC · 192 kHz · 24 bit",
+    );
+  });
+
+  it("keeps one decimal only where it matters, and none where it does not", () => {
+    expect(formatTech({ format: "flac", sampleRate: 44_100, bitDepth: 16 })).toBe(
+      "FLAC · 44.1 kHz · 16 bit",
+    );
+    expect(formatTech({ format: "wav", sampleRate: 48_000, bitDepth: 24 })).toBe(
+      "WAV · 48 kHz · 24 bit",
+    );
+  });
+
+  it("omits whatever the scan could not read", () => {
+    expect(formatTech({ format: "flac", sampleRate: null, bitDepth: 24 })).toBe("FLAC · 24 bit");
+    expect(formatTech({ format: "flac", sampleRate: 96_000, bitDepth: null })).toBe(
+      "FLAC · 96 kHz",
+    );
+    expect(formatTech({ format: "mp3", sampleRate: null, bitDepth: null })).toBe("MP3");
+  });
+
+  it("reads DSD in MHz, where a kilohertz line would be noise", () => {
+    expect(formatTech({ format: "dsf", sampleRate: 2_822_400, bitDepth: 1 })).toBe(
+      "DSF · 2.8 MHz · 1 bit",
+    );
   });
 });
 

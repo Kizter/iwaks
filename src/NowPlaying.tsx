@@ -10,7 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import { Cover } from "./Cover";
 import { LyricsPanel } from "./LyricsPanel";
-import { formatDuration } from "./format";
+import { formatDuration, formatTech } from "./format";
 import {
   playerNext,
   playerPrev,
@@ -83,6 +83,7 @@ export function NowPlaying({
                   {cur.artist ?? "Unknown artist"}
                   {cur.album ? ` — ${cur.album}` : ""}
                 </p>
+                <p className="now-tech">{formatTech(cur)}</p>
               </div>
               <div className="now-controls">
                 <button

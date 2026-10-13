@@ -52,6 +52,35 @@ export function formatBadge(format: string): string {
 }
 
 /**
+ * Technical readout for the Now Playing hero, e.g. "FLAC · 192 kHz · 24 bit".
+ *
+ * The sample rate and bit depth are what make a lossless file "hi-res", and
+ * they are scanned per track — this is the place that finally shows them. A
+ * missing rate or depth is simply omitted rather than guessed; DSD rates read
+ * in MHz, where "2822.4 kHz" would be noise (issue #10).
+ */
+export function formatTech(track: {
+  format: string;
+  sampleRate: number | null;
+  bitDepth: number | null;
+}): string {
+  const parts: string[] = [formatBadge(track.format)];
+  if (track.sampleRate != null && Number.isFinite(track.sampleRate)) {
+    const rate = track.sampleRate;
+    parts.push(rate >= 1_000_000 ? `${trimOne(rate / 1_000_000)} MHz` : `${trimOne(rate / 1_000)} kHz`);
+  }
+  if (track.bitDepth != null && Number.isFinite(track.bitDepth)) {
+    parts.push(`${track.bitDepth} bit`);
+  }
+  return parts.join(" · ");
+}
+
+/** One decimal, no trailing `.0`: 44.1 stays, 48 does not become 48.0. */
+function trimOne(value: number): string {
+  return Number(value.toFixed(1)).toString();
+}
+
+/**
  * Map a raw backend error to user-facing copy. Known classes get a friendly
  * sentence; anything else falls back to a generic one. The untrimmed detail
  * goes to the console for debugging — never to a banner.

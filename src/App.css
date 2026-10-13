@@ -1562,6 +1562,15 @@ input[type="range"].eq-slider::-moz-range-thumb {
   overflow-wrap: anywhere;
 }
 
+/* Hi-res readout — the scanned sample rate / bit depth (issue #10). */
+.now-tech {
+  margin: 6px 0 0;
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
 .now-controls {
   display: flex;
   align-items: center;
