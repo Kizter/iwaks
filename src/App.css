@@ -40,39 +40,39 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ---- Palet ----
-   Satu blok per tema; `data-theme` di <html> yang memilih (lihat src/theme.ts
-   dan skrip pre-paint di index.html). Tidak ada warna literal di luar blok ini:
-   aturan hanya memakai var(). */
+/* ---- Palette ----
+   One block per theme; `data-theme` on <html> selects it (see src/theme.ts and
+   the pre-paint script in index.html). No literal colours outside these blocks:
+   the rules use only var(). */
 
 :root,
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* Iwaks — palet Warm Pastel-Muted (Desaturated) + sentuhan monokrom:
-     parchment hangat + dusty rosewood (nostalgic & bittersweet). */
+  /* Iwaks — Warm Pastel-Muted (Desaturated) palette plus a monochrome touch:
+     warm parchment + dusty rosewood (nostalgic & bittersweet). */
   --bg: #f3ede4; /* warm greige parchment */
   --surface: #faf5ed; /* warm paper (cards, popovers, inputs) */
   --sidebar: #ece5d9; /* deeper warm panel */
-  --ink: #8f5a66; /* dusty rosewood — aksen utama (putih 5.48:1, di bg 4.71:1) */
-  --ink-hover: #7a4955; /* hover tombol (7.12:1) */
-  --ink-soft: #7f5865; /* ikon sekunder (bg 5.18:1, panel 4.81:1, mint 4.95:1) */
-  --ink-strong: #6e3f4b; /* teks/ikon pill aktif */
-  --mint: #f1e7e0; /* hover lembut / cover fallback */
-  --ice: #e6d9d3; /* pill aktif / is-playing / field */
-  --text: #3d352e; /* warm charcoal (sebagian besar heading) */
+  --ink: #8f5a66; /* dusty rosewood — primary accent (5.48:1 on white, 4.71:1 on bg) */
+  --ink-hover: #7a4955; /* button hover (7.12:1) */
+  --ink-soft: #7f5865; /* secondary icon (5.18:1 on bg, 4.81:1 on panel, 4.95:1 on mint) */
+  --ink-strong: #6e3f4b; /* active pill text/icon */
+  --mint: #f1e7e0; /* soft hover / cover fallback */
+  --ice: #e6d9d3; /* active pill / is-playing / field */
+  --text: #3d352e; /* warm charcoal (most headings) */
   /* >= 4.5:1 on --bg (5.01:1) and on hover --mint (4.57:1) */
   --text-dim: #6f6355;
   --line: #ddd4c6;
   --danger: #9a3e35;
   --danger-a09: color-mix(in srgb, var(--danger) 9%, transparent);
-  /* teks di atas latar aksen (tombol primary, badge format DSD, play) */
+  /* text on the accent background (primary button, DSD format badge, play) */
   --on-ink: #ffffff;
-  /* placeholder artwork playlist */
+  /* playlist artwork placeholder */
   --art-grad-from: rgba(138, 85, 98, 0.2);
   --art-grad-to: rgba(196, 148, 108, 0.2);
 
-  /* alpha ramp aksen — menggantikan seluruh rgba biru hardcoded */
+  /* accent alpha ramp — replaces every hardcoded blue rgba */
   --ink-a07: color-mix(in srgb, var(--ink) 7%, transparent);
   --ink-a09: color-mix(in srgb, var(--ink) 9%, transparent);
   --ink-a10: color-mix(in srgb, var(--ink) 10%, transparent);
@@ -84,7 +84,7 @@
   --ink-a35: color-mix(in srgb, var(--ink) 35%, transparent);
   --ink-a45: color-mix(in srgb, var(--ink) 45%, transparent);
 
-  /* elevation warm — menggantikan rgba navy biru */
+  /* warm elevation — replaces the navy blue rgba */
   --shadow-top: rgba(66, 55, 48, 0.05);
   --shadow-float: rgba(58, 46, 40, 0.22);
   --scrim: rgba(58, 46, 40, 0.35);
@@ -99,24 +99,24 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* Rosewood yang sama, dibalik: tanah hangat-gelap, aksen jadi rosewood
-     muda. Semua rasio di bawah diukur terhadap latar gelap (lihat
-     docs/issues/25-dark-mode.md). */
+  /* The same rosewood, inverted: warm dark earth, the accent becomes a
+     lighter rosewood. Every ratio below is measured against the dark
+     background (see docs/issues/25-dark-mode.md). */
   --bg: #1c1815; /* warm near-black (--text 14.02:1) */
-  --surface: #241f1b; /* kartu/popover/input */
-  --sidebar: #14110f; /* panel lebih gelap dari --bg */
-  --ink: #e3aeb9; /* aksen utama (9.25:1 di bg) */
-  --ink-hover: #f0cad2; /* hover tombol */
-  --ink-soft: #cfa3ac; /* ikon sekunder */
-  --ink-strong: #f0d3d8; /* teks/ikon pill aktif (10.14:1 di --ice) */
-  --mint: #2a2320; /* hover lembut / cover fallback */
-  --ice: #322926; /* pill aktif / is-playing / field */
-  --text: #ece4dc; /* teks utama (14.02:1 di bg) */
-  --text-dim: #b0a294; /* teks sekunder (7.09:1 di bg) */
+  --surface: #241f1b; /* card/popover/input */
+  --sidebar: #14110f; /* panel darker than --bg */
+  --ink: #e3aeb9; /* primary accent (9.25:1 on bg) */
+  --ink-hover: #f0cad2; /* button hover */
+  --ink-soft: #cfa3ac; /* secondary icon */
+  --ink-strong: #f0d3d8; /* active pill text/icon (10.14:1 on --ice) */
+  --mint: #2a2320; /* soft hover / cover fallback */
+  --ice: #322926; /* active pill / is-playing / field */
+  --text: #ece4dc; /* primary text (14.02:1 on bg) */
+  --text-dim: #b0a294; /* secondary text (7.09:1 on bg) */
   --line: #3a322d;
-  --danger: #ef8b80; /* (5.98:1 di --danger wash) */
+  --danger: #ef8b80; /* (5.98:1 on the --danger wash) */
   --danger-a09: color-mix(in srgb, var(--danger) 12%, transparent);
-  /* aksen gelap jadi terang → teks di atasnya harus gelap */
+  /* the dark accent becomes light → text on it must be dark */
   --on-ink: #1c1815;
   --art-grad-from: rgba(196, 120, 138, 0.22);
   --art-grad-to: rgba(214, 160, 110, 0.22);
@@ -2464,7 +2464,7 @@ input[type="range"]:disabled {
   margin-top: 14px;
 }
 
-/* ---------- player bar responsive (M4 pasca-uji fix) ----------
+/* ---------- player bar responsive (M4 post-test fix) ----------
    The right tool strip is ~10 controls wide (~500px) and used to overflow
    its 1fr grid track when the window was narrower than ~100%, so icons
    collided with the transport column. Now:
