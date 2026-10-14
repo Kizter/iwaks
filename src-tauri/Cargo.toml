@@ -1,6 +1,6 @@
 [package]
 name = "iwaks"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hi-res & lossless offline music player for Windows"
 authors = ["Iwaks contributors"]
 edition = "2021"
