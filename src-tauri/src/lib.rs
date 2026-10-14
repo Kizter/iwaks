@@ -195,15 +195,29 @@ fn get_eq_presets(state: State<'_, AppState>) -> Result<Vec<EqPreset>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Stored UI theme (`system` | `light` | `dark`); `system` when never set.
+/// The three modes the UI offers. Guarded here too because the value is
+/// persisted: a stray IPC string must not become the stored theme and then
+/// come back out of `get_theme` (code-review #30).
+fn is_theme_mode(mode: &str) -> bool {
+    matches!(mode, "system" | "light" | "dark")
+}
+
+/// Stored UI theme (`system` | `light` | `dark`); `system` when never set or
+/// when a hand-edited row holds something unusable — the frontend only ever
+/// applies a known mode, so it falls back the same way.
 #[tauri::command]
 fn get_theme(state: State<'_, AppState>) -> Result<String, String> {
-    Ok(read_setting(&state.db_path, SETTING_THEME).unwrap_or_else(|| "system".to_string()))
+    Ok(read_setting(&state.db_path, SETTING_THEME)
+        .filter(|mode| is_theme_mode(mode))
+        .unwrap_or_else(|| "system".to_string()))
 }
 
 /// Remember the UI theme choice.
 #[tauri::command]
 fn set_theme(mode: String, state: State<'_, AppState>) -> Result<(), String> {
+    if !is_theme_mode(&mode) {
+        return Err(format!("unknown theme mode: {mode}"));
+    }
     open_lib(&state)?
         .set_setting(SETTING_THEME, &mode)
         .map_err(|e| e.to_string())
@@ -380,6 +394,19 @@ mod tests {
             DEFAULT_CROSSFADE_SECONDS,
             "an unreadable row falls back to the default"
         );
+    }
+
+    /// `set_theme` persists whatever IPC hands it, and `get_theme` reads it
+    /// back — so the guard is the only thing keeping a stray string out of the
+    /// stored theme (code-review #30).
+    #[test]
+    fn only_the_three_offered_theme_modes_are_stored() {
+        for good in ["system", "light", "dark"] {
+            assert!(is_theme_mode(good), "{good} is a mode the UI offers");
+        }
+        for bad in ["", "System", "auto", "dark ", "systemx", "light\n"] {
+            assert!(!is_theme_mode(bad), "{bad} is not a mode the UI offers");
+        }
     }
 }
 
