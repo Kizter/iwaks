@@ -77,18 +77,47 @@ device playing that the UI then rolled back.
 **Fix:** `set_audio_device` persists first, then applies (same shape as
 `set_crossfade`), and tolerates the player being absent.
 
-## Out of scope (judgement calls, not fixed)
+## Out of scope (judgement calls)
 
-These were noted by the review but deliberately left:
+These were noted by the review but deliberately left out of the bug-fix pass —
+none is a behaviour defect. All four were picked up afterwards, in a follow-up
+cleanup pass (see below).
 
-- `set_theme(mode: String)` accepts any string from IPC; validation lives in the
-  frontend (`isThemeMode`). Value is written, not executed, so it is cosmetic.
+- `set_theme(mode: String)` accepts any string from IPC; validation lived only in
+  the frontend (`isThemeMode`). Value is written, not executed, so it is cosmetic.
 - Palette comments in `src/App.css` are Indonesian while the rest of the repo is
   English — a review-copy accident, not a behaviour issue.
 - `genres()`'s doc string claims "case-insensitively deduped" but `SELECT
   DISTINCT` is case-sensitive (`"Rock"` vs `"rock"` are two chips).
 - `player.rs` has grown past 1500 lines (divergent change) and the
   `bump_queue_version` + `ClearPrefetch` trio repeats — refactors, not defects.
+
+## Follow-up cleanup (all four addressed)
+
+- **Theme validation** — `src-tauri/lib.rs` gained `is_theme_mode`; `set_theme`
+  now rejects an unknown mode and `get_theme` falls back to `system` when a
+  hand-edited row holds junk, so the guard no longer depends on the frontend
+  alone. Covered by `only_the_three_offered_theme_modes_are_stored`.
+- **Palette comments** — every Indonesian comment in `src/App.css` (light and
+  dark palettes, the section header, the `pasca-uji` section label) is now
+  English. No selector or value changed; `App.css.test.ts` still passes.
+- **`genres()` case-insensitive dedup** — the query now groups by
+  `lower(genre)` and selects `MIN(genre)`, so a library holding both `Rock` and
+  `rock` offers one chip instead of two (the doc's promise). Covered by
+  `genres_dedupe_spellings_that_differ_only_in_case`.
+- **`player.rs` size + repeated trio** — the 1560-line test module moved to
+  `crates/player/src/player/tests.rs` (the module is now a directory module;
+  `player.rs` dropped from 3214 to 1663 lines), and the
+  `bump; ClearPrefetch; bump` sequence became a named `invalidate_queue()`.
+  Nothing reads `queue_version` between the two former bumps (the `ClearPrefetch`
+  handler does not emit, and no test asserts an exact count — only that a change
+  happened), so a single bump is the same signal, and the queue-view refetch is
+  unchanged.
+
+Gates re-run green after the cleanup: `cargo fmt --all --check`, `cargo clippy
+--workspace --all-targets -- -D warnings`, `cargo test --workspace` (339 passed
+/ 0 failed / 5 ignored — the live libmpv suite included, 76 player tests),
+`npx vitest run` 24/24, `npm run build`.
 
 ## Evidence
 
