@@ -392,12 +392,15 @@ impl Library {
     }
 
     /// Every genre present in the library, for the filter chips: distinct,
-    /// blanks and `NULL` excluded, case-insensitively deduped on the spelling
-    /// that is actually stored (so the value can be bound back as-is).
+    /// blanks and `NULL` excluded, case-insensitively deduped on a spelling
+    /// that is actually stored (so the value can be bound back as-is). `MIN`
+    /// picks that spelling deterministically when the library holds e.g. both
+    /// `Rock` and `rock`.
     pub fn genres(&self) -> Result<Vec<String>, LibraryError> {
         let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT genre FROM tracks
+            "SELECT MIN(genre) FROM tracks
              WHERE genre IS NOT NULL AND trim(genre) <> ''
+             GROUP BY lower(genre)
              ORDER BY lower(genre)",
         )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;

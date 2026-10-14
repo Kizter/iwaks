@@ -338,6 +338,33 @@ fn genres_skip_missing_and_blank_values() {
 }
 
 #[test]
+fn genres_dedupe_spellings_that_differ_only_in_case() {
+    let mut lib = fixture(); // already holds two `Rock` rows
+    lib.upsert_track(&track(
+        "/m/rock-lower.flac",
+        "Rock lowercase",
+        Some("rock"),
+        Some(2000),
+        500,
+        700,
+    ))
+    .expect("insert");
+    lib.upsert_track(&track(
+        "/m/jazz-lower.flac",
+        "Jazz lowercase",
+        Some("jazz"),
+        Some(2000),
+        500,
+        800,
+    ))
+    .expect("insert");
+    // One chip per genre, not one per spelling: `Rock`/`rock` collapse to the
+    // stored `Rock`, `Jazz`/`jazz` to `Jazz` (`.genres()` promises the
+    // case-insensitive dedup).
+    assert_eq!(lib.genres().unwrap(), ["Jazz", "Metal", "Rock"]);
+}
+
+#[test]
 fn decades_skip_undated_and_zero_years_newest_first() {
     let mut lib = fixture();
     lib.upsert_track(&track(
