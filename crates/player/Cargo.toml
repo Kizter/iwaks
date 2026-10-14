@@ -1,8 +1,8 @@
 [package]
 name = "iwaks-player"
-version = "0.2.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "libmpv playback wrapper (runtime-loaded DLL), queue & repeat logic"
 
 [dependencies]
