@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   setOnlineCover: vi.fn(),
   getTheme: vi.fn(),
   setTheme: vi.fn(),
+  listenTheme: vi.fn(),
 }));
 
 vi.mock("./api", () => api);

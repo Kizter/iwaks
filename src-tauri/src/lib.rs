@@ -212,15 +212,22 @@ fn get_theme(state: State<'_, AppState>) -> Result<String, String> {
         .unwrap_or_else(|| "system".to_string()))
 }
 
-/// Remember the UI theme choice.
+/// Remember the UI theme choice, and tell every window about it.
+///
+/// The mini player is a separate document with its own stylesheet, so it has to
+/// be told rather than inherit anything (issue #32). Emitting here, rather than
+/// from whoever called this, also means the window that made the choice reacts
+/// through the same path as the other one.
 #[tauri::command]
-fn set_theme(mode: String, state: State<'_, AppState>) -> Result<(), String> {
+fn set_theme(app: AppHandle, mode: String, state: State<'_, AppState>) -> Result<(), String> {
     if !is_theme_mode(&mode) {
         return Err(format!("unknown theme mode: {mode}"));
     }
     open_lib(&state)?
         .set_setting(SETTING_THEME, &mode)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("theme-changed", mode);
+    Ok(())
 }
 
 /// Audio devices mpv can output to. Read from the playback thread on demand,

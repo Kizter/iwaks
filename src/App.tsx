@@ -17,7 +17,6 @@ import {
   getPlayerState,
   getPlaylistTracks,
   getQueue,
-  getTheme,
   getTracks,
   importM3u,
   listenPlayer,
@@ -50,7 +49,6 @@ import { Cover } from "./Cover";
 import { NowPlaying } from "./NowPlaying";
 import PlayerBar from "./PlayerBar";
 import Settings from "./Settings";
-import { applyTheme, isThemeMode, watchSystemTheme, type ThemeMode } from "./theme";
 import {
   ArrowsDownUp,
   CaretLeft,
@@ -1232,27 +1230,9 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
 
-  // Theme (issue #25): the stored mode wins, and `system` keeps following the OS
-  // for as long as the window is open.
-  useEffect(() => {
-    let alive = true;
-    let unwatch = () => {};
-    getTheme()
-      .then((mode) => {
-        if (!alive) return;
-        const choice: ThemeMode = isThemeMode(mode) ? mode : "system";
-        applyTheme(choice);
-        if (choice === "system") unwatch = watchSystemTheme(() => applyTheme("system"));
-      })
-      .catch(() => {
-        // No stored theme: the pre-paint script already applied the OS one.
-        if (alive) applyTheme("system");
-      });
-    return () => {
-      alive = false;
-      unwatch();
-    };
-  }, []);
+  // Theme (issue #25) is applied by `initTheme()` in `main.tsx`, before this
+  // component renders: the mini player is a second document and needs the same
+  // start-up path (issue #32), so it cannot live in one root's effect.
 
   // Facets for the filter chips, refetched after a scan brings in new tags.
   useEffect(() => {

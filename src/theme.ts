@@ -1,5 +1,5 @@
 /**
- * Light/dark theming (issue #25).
+ * Light/dark theming (issues #25, #32).
  *
  * The palettes live in `App.css` as two blocks that both declare the same
  * custom properties; `data-theme` on `<html>` picks one. Nothing else in the
@@ -10,6 +10,8 @@
  * `@media (prefers-color-scheme)` override, so the dark palette is declared
  * exactly once instead of once per trigger.
  */
+
+import { getTheme, listenTheme } from "./api";
 
 /** What the user picked: follow the OS, or pin one theme. */
 export type ThemeMode = "system" | "light" | "dark";
@@ -66,4 +68,66 @@ export function watchSystemTheme(onChange: () => void): () => void {
   }
   media.addListener(listener);
   return () => media.removeListener(listener);
+}
+
+/**
+ * How to stop the current OS-preference watcher, if there is one.
+ *
+ * Module state on purpose: there is one watcher per document, and a second
+ * caller applying a mode must cancel the first one's rather than race it for
+ * `data-theme`.
+ */
+let unwatchOs: () => void = () => {};
+
+/**
+ * Apply a mode to this document and follow the OS only while it is `system`.
+ *
+ * Every window applies themes through here — `initTheme` at start-up, and the
+ * settings page when the user picks one — so the watcher has a single owner.
+ */
+export function applyThemeMode(mode: ThemeMode): void {
+  unwatchOs();
+  applyTheme(mode);
+  unwatchOs = mode === "system" ? watchSystemTheme(() => applyTheme("system")) : () => {};
+}
+
+/**
+ * Theme this document from the stored choice, and keep it current (issue #32).
+ *
+ * Called once from `main.tsx`, before either root renders. The main window used
+ * to do this itself, which left the mini player on the OS preference forever:
+ * it is a separate document, so it neither read the stored mode nor heard about
+ * a change made in the other window.
+ *
+ * Returns a function that stops listening for changes.
+ */
+export function initTheme(): () => void {
+  let disposed = false;
+  let unwatchEvents = () => {};
+
+  getTheme()
+    .then((mode) => {
+      if (!disposed) applyThemeMode(isThemeMode(mode) ? mode : "system");
+    })
+    .catch(() => {
+      // Nothing stored, or no backend: the pre-paint script already applied the
+      // OS preference, and `system` keeps following it.
+      if (!disposed) applyThemeMode("system");
+    });
+
+  void listenTheme((mode) => {
+    if (!disposed && isThemeMode(mode)) applyThemeMode(mode);
+  })
+    .then((un) => {
+      if (disposed) un();
+      else unwatchEvents = un;
+    })
+    .catch(() => {
+      // No event channel (a plain browser, or a test). Nothing to release.
+    });
+
+  return () => {
+    disposed = true;
+    unwatchEvents();
+  };
 }

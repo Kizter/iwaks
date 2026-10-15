@@ -171,6 +171,16 @@ export function setTheme(mode: string): Promise<void> {
   return invoke<void>("set_theme", { mode });
 }
 
+/**
+ * Theme changes, from any window (issue #32).
+ *
+ * The mini player is a separate document, so a choice made in the main window
+ * has to reach it as an event; the payload is the stored mode.
+ */
+export function listenTheme(onMode: (mode: string) => void): Promise<UnlistenFn> {
+  return listen<string>("theme-changed", (e) => onMode(e.payload));
+}
+
 /** Mirrors iwaks_player::AudioDevice (serde camelCase). */
 export interface AudioDevice {
   /** mpv identifier; empty string is the system default. */

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { DiscordLogo, Keyboard, NotePencil, PaintBrushBroad, SpeakerHigh } from "@phosphor-icons/react";
 import {
   getAudioDevice,
@@ -17,10 +17,9 @@ import {
 } from "./api";
 import { friendlyError } from "./format";
 import {
-  applyTheme,
+  applyThemeMode,
   isThemeMode,
   THEME_MODES,
-  watchSystemTheme,
   type ThemeMode,
 } from "./theme";
 import type { CrossfadeSettings } from "./types";
@@ -64,9 +63,6 @@ export default function Settings() {
   const [fadeSeconds, setFadeSeconds] = useState<number | null>(null);
   // Appearance (issue #25). `null` until the stored mode arrives.
   const [theme, setThemeMode] = useState<ThemeMode | null>(null);
-  // Unsubscribe from the OS theme watcher while this page is mounted.
-  const unwatchRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => unwatchRef.current?.(), []);
 
   useEffect(() => {
     let alive = true;
@@ -162,14 +158,14 @@ export default function Settings() {
   const pickTheme = (mode: ThemeMode) => {
     const previous = theme;
     setThemeMode(mode);
-    applyTheme(mode);
-    // A pinned theme stops following the OS; `system` starts following again.
-    unwatchRef.current?.();
-    unwatchRef.current =
-      mode === "system" ? watchSystemTheme(() => applyTheme("system")) : null;
+    // Applied here so the choice lands without waiting for the round trip. The
+    // command emits `theme-changed` to every window, this one included, and
+    // `applyThemeMode` owns the OS watcher in exactly one place — so picking a
+    // pinned mode stops following the OS from here too (issues #25, #32).
+    applyThemeMode(mode);
     void setTheme(mode).catch((e: unknown) => {
       setThemeMode(previous);
-      if (previous) applyTheme(previous);
+      if (previous) applyThemeMode(previous);
       setError(`Couldn't save that setting — ${friendlyError(e)}`);
     });
   };
