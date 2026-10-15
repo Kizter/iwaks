@@ -12,9 +12,10 @@ status: "done"
 > closed). Every entry below is ordered **easiest → hardest**, so the risky work
 > (theme engine, dual-instance audio) is always last.
 >
-> **Status:** the 13 items are done, but **v0.3.0 is not shipped** — user
-> testing of the release candidate found three bugs, swept in
-> "Post-audit bug sweep" below. The version bump is committed locally and held.
+> **Status:** shipped as **v0.3.0** — [release](https://github.com/Kizter/iwaks/releases/tag/v0.3.0),
+> NSIS installer `Iwaks_0.3.0_x64-setup.exe` (+ SHA256). The 13 items are done;
+> user testing of the release candidate found three bugs, swept in
+> "Post-audit bug sweep" below, and the release was held until they were fixed.
 
 ## Vision
 
@@ -65,8 +66,8 @@ expensive subsystems last.
 ## Post-audit bug sweep
 
 User testing of the release candidate found three bugs in work this audit had
-already ticked off. They are tracked here because **v0.3.0 is not shipped** — the
-version bump is committed locally and held until the sweep is done.
+already ticked off. They are tracked here because the release was **held** while
+they were fixed: v0.3.0 only went out once all three were confirmed by hand.
 
 - **31 — other apps stayed silent until Iwaks was closed and restarted**
   (`docs/issues/31-other-apps-silenced-exclusive.md`). The Exclusive mode switch
