@@ -50,10 +50,11 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logFile, setLogFile] = useState<string | null>(null);
-  // Audio output (issues #23, #24). `devices` is fetched when the picker opens
-  // so it can never be a stale hot-plug snapshot.
+  // Audio output (issues #23, #24, #33). `devices` is read once the page
+  // mounts — not when the select is clicked. Fetching on the open gesture
+  // disabled the very control being clicked, so the native popup was dismissed
+  // before it could show anything but "System default".
   const [devices, setDevices] = useState<AudioDevice[]>([]);
-  const [devicesLoading, setDevicesLoading] = useState(false);
   const [device, setDevice] = useState<string | null>(null);
   const [exclusive, setExclusive] = useState<boolean | null>(null);
   // Crossfade (issue #27). `null` until the stored pair arrives. `draft` holds
@@ -102,7 +103,19 @@ export default function Settings() {
         setDevice(d);
         setExclusive(x);
       })
-      .catch(() => {});
+      .catch(() => {
+        // A failed read must not leave the picker disabled: a select that
+        // cannot be opened is exactly what issue #33 looked like from outside.
+        if (alive) setDevice((current) => current ?? "");
+      });
+    // Read the list here, with the rest of the audio row (issue #33).
+    listAudioDevices()
+      .then((list) => {
+        if (alive) setDevices(list);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(`Couldn't list audio devices — ${friendlyError(e)}`);
+      });
     return () => {
       alive = false;
     };
@@ -159,16 +172,6 @@ export default function Settings() {
       if (previous) applyTheme(previous);
       setError(`Couldn't save that setting — ${friendlyError(e)}`);
     });
-  };
-
-  // Enumerated on demand: mpv has no change event we consume, and opening the
-  // picker is the moment a stale list would actually be noticed.
-  const loadDevices = () => {
-    setDevicesLoading(true);
-    listAudioDevices()
-      .then((list) => setDevices(list))
-      .catch((e: unknown) => setError(`Couldn't list audio devices — ${friendlyError(e)}`))
-      .finally(() => setDevicesLoading(false));
   };
 
   const pickDevice = (name: string) => {
@@ -321,13 +324,15 @@ export default function Settings() {
                 in is here.
               </span>
             </div>
+            {/* Disabled only until the stored choice arrives, so the control
+                never flashes "System default" over a saved device. Never
+                disabled while the list loads — that is what kept the popup
+                from opening (issue #33). */}
             <select
               className="set-select"
               aria-labelledby="set-device"
               value={device ?? ""}
-              disabled={devicesLoading || device === null}
-              onFocus={loadDevices}
-              onClick={loadDevices}
+              disabled={device === null}
               onChange={(e) => pickDevice(e.target.value)}
             >
               <option value="">System default</option>
