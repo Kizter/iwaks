@@ -1483,6 +1483,89 @@ fn exclusive_output_refuses_to_prefetch() {
 }
 
 #[test]
+fn turning_exclusive_off_mid_session_lets_crossfade_prefetch_again() {
+    if !have_libmpv() {
+        return;
+    }
+    let (_dirs, tracks) = crossfade_fixture("xf-exclusive-off", 6.0);
+    let sink: StateSink = Box::new(|_| {});
+    // `ao=null` again: this is about the session's decision rather than a real
+    // device, so it runs wherever libmpv exists — CI has no audio endpoint.
+    let player = Player::start(
+        &Options {
+            ao_null: true,
+            audio_exclusive: true,
+            audio_device: String::new(),
+        },
+        sink,
+    )
+    .expect("an exclusive session still starts (ao=null ignores it)");
+    assert!(player.engine.lock().unwrap().is_exclusive());
+
+    // Issue #31: this used to mean closing Iwaks and starting it again.
+    player.set_audio_exclusive(false);
+    wait_for(&player, Duration::from_secs(5), |_| {
+        !player.engine.lock().unwrap().is_exclusive()
+    })
+    .expect("the session drops exclusive output without a restart");
+
+    // That flag is what the crossfade guard reads, so a prefetch appearing now
+    // is what proves the switch reached the session — not just the setting.
+    player.set_crossfade(Crossfade {
+        enabled: true,
+        seconds: DEFAULT_CROSSFADE_SECONDS,
+    });
+    player.play_tracks(tracks, 0);
+    wait_for(&player, Duration::from_secs(10), |s| s.prefetched)
+        .expect("a second core opens again once exclusive is off");
+    player.shutdown();
+}
+
+#[test]
+fn exclusive_output_can_be_switched_while_a_real_device_is_open() {
+    if !have_libmpv() || !live_audio_requested() {
+        return;
+    }
+    let dir = test_dir("exclusive-live");
+    let a = dir.join("a.wav");
+    write_wav(&a, 4.0);
+    let Ok(player) = start_live_audio_player() else {
+        eprintln!("SKIP: no real audio output on this machine");
+        return;
+    };
+    player.play_tracks(vec![track(a.to_str().unwrap(), "A", 4.0)], 0);
+    // Wait for the output to be open and *consuming*, not merely unpaused. The
+    // question is what happens when the option changes while an `ao` is already
+    // running; toggling before mpv has opened one would prove nothing.
+    wait_for(&player, Duration::from_secs(10), |s| s.position > 0.2)
+        .expect("playing through a real device");
+    assert!(
+        !player.engine.lock().unwrap().is_exclusive(),
+        "started shared"
+    );
+
+    // mpv has to accept the option with an output already open. Issue #24
+    // assumed it could not; #31 is that assumption showing up as "restart Iwaks
+    // to get your sound back".
+    player.set_audio_exclusive(true);
+    wait_for(&player, Duration::from_secs(5), |_| {
+        player.engine.lock().unwrap().is_exclusive()
+    })
+    .expect("the device can be taken mid-session");
+    player.set_audio_exclusive(false);
+    wait_for(&player, Duration::from_secs(5), |_| {
+        !player.engine.lock().unwrap().is_exclusive()
+    })
+    .expect("and handed back mid-session");
+
+    // Two audio-output reopens later the pump must still serve commands.
+    player.set_volume(42);
+    wait_for(&player, Duration::from_secs(5), |s| s.volume == 42)
+        .expect("pump still serving commands after the switches");
+    player.shutdown();
+}
+
+#[test]
 fn crossfade_preferences_are_validated() {
     // Pure logic, no libmpv.
     assert_eq!(Crossfade::default().window(), None, "off means no window");

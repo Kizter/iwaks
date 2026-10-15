@@ -351,9 +351,10 @@ export default function Settings() {
               </span>
               <span className="set-note">
                 Bit-perfect output for hi-res playback. It takes exclusive control
-                of the device, which silences other apps for as long as Iwaks
-                plays — off is the default, and the switch takes effect the next
-                time Iwaks starts.
+                of the device, which silences other apps (YouTube, Discord) while
+                the exclusive stream is open. Off is the default, and the switch
+                applies straight away: turning it off hands the device back
+                without restarting Iwaks.
               </span>
             </div>
             <button
@@ -382,7 +383,7 @@ export default function Settings() {
                 it's on — tracks stop being gapless — and it can't be combined
                 with exclusive output. Off is the default.
                 {exclusive
-                  ? " Exclusive mode is on, so crossfade stays inactive until you turn it off and restart Iwaks."
+                  ? " Exclusive mode is on, so crossfade stays inactive until you turn it off."
                   : ""}
               </span>
             </div>

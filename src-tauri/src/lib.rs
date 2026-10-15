@@ -256,14 +256,18 @@ fn get_audio_device(state: State<'_, AppState>) -> Result<String, String> {
     Ok(read_setting(&state.db_path, SETTING_AUDIO_DEVICE).unwrap_or_default())
 }
 
-/// Whether exclusive (bit-perfect) output is on. Applied at startup, since
-/// libmpv only accepts the option before initialisation (issue #24).
+/// Whether exclusive (bit-perfect) output is on.
 #[tauri::command]
 fn get_audio_exclusive(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(read_setting(&state.db_path, SETTING_AUDIO_EXCLUSIVE).as_deref() == Some("true"))
 }
 
-/// Turn exclusive output on/off; takes effect the next time Iwaks starts.
+/// Turn exclusive output on/off, and apply it to the running session.
+///
+/// Immediate since issue #31: it used to be startup-only, so turning exclusive
+/// off left other apps silent until Iwaks was restarted. Stored first, applied
+/// second — the same order `set_audio_device` and `set_crossfade` use, so a
+/// failed write cannot leave the UI and the session disagreeing.
 #[tauri::command]
 fn set_audio_exclusive(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
     open_lib(&state)?
@@ -271,7 +275,11 @@ fn set_audio_exclusive(enabled: bool, state: State<'_, AppState>) -> Result<(), 
             SETTING_AUDIO_EXCLUSIVE,
             if enabled { "true" } else { "false" },
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    if let Some(p) = player(&state) {
+        p.set_audio_exclusive(enabled);
+    }
+    Ok(())
 }
 
 /// The stored crossfade preferences, clamped to what the UI offers (issue #27).

@@ -52,6 +52,28 @@ covers both audio flags and the device choice from issue #23.
 `cargo test --workspace` (312 passed, 5 ignored live) are green, as are
 `npx tsc --noEmit` and `npm run build`.
 
+## Correction (2026-10-15)
+
+The premise above — "libmpv only accepts `audio-exclusive` before
+initialisation" — is **wrong**, and it is what turned this deliberate design into
+the bug in issue #31 ("other apps stay silent until Iwaks is restarted").
+
+mpv accepts `set audio-exclusive yes|no` at runtime and re-opens the audio output
+by itself. Measured with `IWAKS_MPV_LOG=v` while a track was playing:
+
+```
+AO: [wasapi] 48000Hz stereo 2ch float
+Set property: audio-exclusive=yes -> 1
+Trying audio driver 'wasapi'
+AO: [wasapi] 48000Hz stereo 2ch s16
+```
+
+So the tear-down-and-rebuild this Outcome describes is real, but mpv performs it,
+and it is fast enough to be a switch rather than a restart. `set_audio_exclusive`
+now applies to the running session; see `docs/issues/31` for the fix. The
+startup application here is still correct and still needed — it is just no longer
+the *only* way the flag can take effect.
+
 ## References
 
 - `src-tauri/src/lib.rs` (`SETTING_AUDIO_EXCLUSIVE`, `startup_options`,

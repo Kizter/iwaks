@@ -322,6 +322,9 @@ enum Cmd {
     ListDevices(mpsc::Sender<Vec<AudioDevice>>),
     /// Apply a new `audio-device` on the pump thread.
     SetAudioDevice(String),
+    /// Turn WASAPI exclusive output on/off mid-session (issue #31). Applied on
+    /// the pump thread, which is the only place libmpv may be touched.
+    SetAudioExclusive(bool),
     /// Drop a prefetched track (queue changed underneath it).
     ClearPrefetch,
     /// Update the crossfade preferences. No libmpv work; the pump reads them.
@@ -670,6 +673,15 @@ impl Player {
     /// the current output untouched and is visible in the next state tick.
     pub fn set_audio_device(&self, name: &str) {
         self.push(Cmd::SetAudioDevice(name.to_string()));
+    }
+
+    /// Turn exclusive (bit-perfect) output on/off mid-session (issue #31).
+    ///
+    /// Queued like every other change: the pump is the only thread allowed to
+    /// touch libmpv, and it re-initialises the audio output as it applies this,
+    /// so the device changes hands without a restart.
+    pub fn set_audio_exclusive(&self, on: bool) {
+        self.push(Cmd::SetAudioExclusive(on));
     }
 
     /// Crossfade on/off and how long the overlap should be (issue #27).
@@ -1024,6 +1036,37 @@ impl Player {
                         iwaks_log::Level::Warn,
                         &format!("audio-device '{value}' rejected by mpv ({e})"),
                     );
+                }
+                self.emit();
+            }
+            Cmd::SetAudioExclusive(on) => {
+                // Issue #31: this used to be startup-only, so turning exclusive
+                // off meant closing Iwaks before other apps could be heard
+                // again. mpv re-initialises the audio output when the option
+                // changes, which is what hands the device back (or takes it).
+                let value = if on { "yes" } else { "no" };
+                match self.api().command(&["set", "audio-exclusive", value]) {
+                    Ok(()) => {
+                        // A prefetched core was built from the same options and
+                        // would otherwise open its output in the old mode when
+                        // it takes over.
+                        let mut engine = self.engine.lock().unwrap();
+                        if let Some(idle) = engine.idle() {
+                            let _ = idle.command(&["set", "audio-exclusive", value]);
+                        }
+                        engine.set_exclusive(on);
+                    }
+                    Err(e) => {
+                        // Reported, not faked: the session keeps the mode mpv
+                        // actually accepted, and the stored setting lands at the
+                        // next start.
+                        iwaks_log::line(
+                            iwaks_log::Level::Warn,
+                            &format!(
+                                "mpv refused audio-exclusive={value} ({e}); it applies at the next start"
+                            ),
+                        );
+                    }
                 }
                 self.emit();
             }

@@ -217,11 +217,21 @@ impl Engine {
 
     /// Is this a session on WASAPI exclusive output?
     ///
-    /// Only set at startup (`Options`), so a crossfade has to ask here rather
-    /// than take another argument: exclusive mode takes the device for itself
-    /// and a second core cannot share it.
+    /// A crossfade has to ask here rather than take another argument: exclusive
+    /// mode takes the device for itself and a second core cannot share it.
+    /// Switchable while the session runs (issue #31), so the answer is not
+    /// fixed at startup the way it was.
     pub fn is_exclusive(&self) -> bool {
         self.options.audio_exclusive
+    }
+
+    /// Turn exclusive output on/off for the running session (issue #31).
+    ///
+    /// This is the same flag [`setup_core`] reads, so a core created *after*
+    /// the switch — the next prefetch — is built in the mode the user last
+    /// chose rather than the mode the session started in.
+    pub fn set_exclusive(&mut self, on: bool) {
+        self.options.audio_exclusive = on;
     }
 
     /// The `af` chain the free core was given, if any.
@@ -358,5 +368,17 @@ mod tests {
     #[test]
     fn default_is_an_empty_engine() {
         assert!(Engine::default().is_empty());
+    }
+
+    #[test]
+    fn exclusive_output_can_be_switched_while_the_session_runs() {
+        // Issue #31: the flag used to be fixed at startup, so turning exclusive
+        // off meant closing Iwaks before other apps could be heard again.
+        let mut engine = Engine::empty();
+        assert!(!engine.is_exclusive(), "shared by default");
+        engine.set_exclusive(true);
+        assert!(engine.is_exclusive(), "and it can be taken mid-session");
+        engine.set_exclusive(false);
+        assert!(!engine.is_exclusive(), "then handed straight back");
     }
 }
