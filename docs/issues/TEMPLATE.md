@@ -1,13 +1,13 @@
 ---
 title: "<issue title>"
 labels: ["<bug|enhancement>", "priority:P1", "area:<area>"]
-milestone: "v0.2.0"
+milestone: "v0.3.0"
 status: "draft"
 ---
 
 <!-- One issue per file. Set `status: ready` once confirmed. Frontmatter
 labels/milestone are suggestions applied at publish time; see
-docs/ROADMAP-2026-v0.2.0.md → "How to publish". -->
+docs/ROADMAP-2026-v0.3.0.md → "How to publish". -->
 
 ## Summary
 <!-- 2-3 sentences: what is wrong / what is missing, from a user's perspective. -->

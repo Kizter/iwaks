@@ -11,6 +11,10 @@ status: "done"
 > shipped code after v0.2.0 landed (all 13 items done, all GitHub issues
 > closed). Every entry below is ordered **easiest → hardest**, so the risky work
 > (theme engine, dual-instance audio) is always last.
+>
+> **Status:** the 13 items are done, but **v0.3.0 is not shipped** — user
+> testing of the release candidate found three bugs, swept in
+> "Post-audit bug sweep" below. The version bump is committed locally and held.
 
 ## Vision
 
@@ -58,6 +62,40 @@ expensive subsystems last.
       <!-- docs/issues/26-equalizer-presets.md -->
 - [x] **27** Crossfade <!-- docs/issues/27-crossfade.md -->
 
+## Post-audit bug sweep
+
+User testing of the release candidate found three bugs in work this audit had
+already ticked off. They are tracked here because **v0.3.0 is not shipped** — the
+version bump is committed locally and held until the sweep is done.
+
+- **31 — other apps stayed silent until Iwaks was closed and restarted**
+  (`docs/issues/31-other-apps-silenced-exclusive.md`). The Exclusive mode switch
+  only wrote the setting and was applied at startup, resting on #24's claim that
+  libmpv takes `audio-exclusive` only before initialisation. It does not: mpv
+  takes it at runtime and re-opens the audio output itself, measured with
+  `IWAKS_MPV_LOG=v` on a real device (`s16` exclusive vs `float` shared). The
+  switch now reaches the running session, prefetch core included.
+- **32 — the mini player window ignored the stored theme**
+  (`docs/issues/32-mini-player-ignores-theme.md`). The theme was applied in
+  `App.tsx`, and the mini player is a second document that only ran the pre-paint
+  OS guess.
+- **33 — the output device picker offered only "System default"**
+  (`docs/issues/33-output-device-picker-first-click.md`). The list was fetched
+  from the select's own open gesture, and the fetch disabled the control that was
+  being clicked, so the popup was dismissed every time.
+
+Each fix carries regression tests (Rust + vitest), and #24 now has a correction.
+Also part of this milestone, from before the sweep: #29 (empty
+`audio-device-list`) and #30 (code-review findings).
+
+One out-of-scope item landed anyway: vitest + testing-library (`npm test`, 5
+files / 36 tests), which covers the M4/M5 UI work the original audit deferred.
+
+Left open on purpose: whether the endpoint is released while playback is
+**paused** with exclusive on — mpv holds the `ao` so resuming is instant. Only a
+human ear can settle it; what the fix changed is the cost of the symptom, from a
+restart to one click.
+
 ## Issue index
 
 | ID | M | Difficulty | Area | Slug |
@@ -100,8 +138,6 @@ Same flow as v0.2.0: draft in `docs/issues/NN-*.md`, then `gh issue create
   `cover_cache` path
 - Centralised `AppError` type — broad refactor across every command for little
   user-visible gain; friendly strings already ship
-- Frontend test framework (vitest) — valuable but orthogonal; carry as its own
-  roadmap item before any large UI milestone (M4/M5)
 
 ---
 

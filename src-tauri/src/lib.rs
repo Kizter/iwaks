@@ -205,6 +205,9 @@ fn is_theme_mode(mode: &str) -> bool {
 /// Stored UI theme (`system` | `light` | `dark`); `system` when never set or
 /// when a hand-edited row holds something unusable — the frontend only ever
 /// applies a known mode, so it falls back the same way.
+///
+/// Read by every window at startup (issues #25, #32); changes are broadcast by
+/// `set_theme`.
 #[tauri::command]
 fn get_theme(state: State<'_, AppState>) -> Result<String, String> {
     Ok(read_setting(&state.db_path, SETTING_THEME)
